@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\", \"${env:ProgramFiles\\(x86\\)}\\\\nodejs\\\\node.exe\", \"$env:LOCALAPPDATA\\\\nodejs\\\\node.exe\", \"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Output \"FOUND: $p\"; & $p --version } }; Get-Command nvm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; where.exe node 2>$null; where.exe nvm 2>$null)",
+      "PowerShell(Get-Command winget -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command choco -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command fnm -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command volta -ErrorAction SilentlyContinue)",
+      "PowerShell(fnm list)",
+      "PowerShell(fnm install --lts)",
+      "PowerShell(fnm use default 2>$null; fnm env --json | ConvertFrom-Json | Format-List; Write-Output \"MULTISHELL:\"; \\(fnm env --json | ConvertFrom-Json\\).FNM_MULTISHELL_PATH)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\" -Directory | ForEach-Object { $_.FullName }; Write-Output \"---aliases---\"; if \\(Test-Path \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\aliases\"\\) { Get-ChildItem \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\aliases\" | ForEach-Object { \"$\\($_.Name\\) -> $\\(\\(Get-Item $_.FullName\\).Target\\)\" } })",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; node --version; npm --version)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm install 2>&1 | Tee-Object -FilePath \"e:\\\\Proyectos\\\\Turnerito\\\\.data\\\\npm-install.log\")",
+      "PowerShell(docker --version)",
+      "PowerShell(docker compose version)",
+      "PowerShell(scoop list 2>$null)",
+      "PowerShell(Get-Command psql -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command pg_ctl -ErrorAction SilentlyContinue)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npx tsc --noEmit -p tsconfig.build.json 2>&1 | Select-Object -First 80)",
+      "PowerShell(cd \"e:\\\\Proyectos\\\\Turnerito\"; Get-ChildItem node_modules/typescript -Force | Select-Object Name; \"--- lib count ---\"; \\(Get-ChildItem node_modules/typescript/lib -ErrorAction SilentlyContinue | Measure-Object\\).Count; \"--- install log tail ---\"; Get-Content .data/npm-install.log -Tail 15 -ErrorAction SilentlyContinue)",
+      "PowerShell(cd \"e:\\\\Proyectos\\\\Turnerito\"; Test-Path package-lock.json; \\(Get-ChildItem node_modules | Measure-Object\\).Count)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue; npm install --no-audit --no-fund 2>&1 | Out-File -FilePath \"e:\\\\Proyectos\\\\Turnerito\\\\.data\\\\npm-install2.log\"; \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(cd \"e:\\\\Proyectos\\\\Turnerito\"; \"ts dir:\"; Test-Path node_modules/typescript; Get-ChildItem node_modules/typescript -ErrorAction SilentlyContinue | Select-Object Name; \"--- total pkgs ---\"; \\(Get-ChildItem node_modules | Measure-Object\\).Count; \"--- log tail ---\"; Get-Content .data/npm-install2.log -Tail 25 -ErrorAction SilentlyContinue)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm install --no-audit --no-fund)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; node node_modules/typescript/bin/tsc --noEmit -p tsconfig.build.json 2>&1 | Select-Object -First 120)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm run build 2>&1 | Select-Object -Last 30)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm test 2>&1 | Select-Object -Last 40)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm test 2>&1 | Select-Object -Last 20)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm test 2>&1 | Select-Object -Last 12)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm run lint 2>&1 | Select-Object -Last 40)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm run lint 2>&1 | Select-Object -Last 20)",
+      "PowerShell($env:PATH = \"C:\\\\Users\\\\MegaTecnologia\\\\AppData\\\\Roaming\\\\fnm\\\\node-versions\\\\v24.16.0\\\\installation;$env:PATH\"; cd \"e:\\\\Proyectos\\\\Turnerito\"; npm run build 2>&1 | Select-Object -Last 8; \"=== TEST ===\"; npm test 2>&1 | Select-Object -Last 8)"
+    ]
+  }
+}

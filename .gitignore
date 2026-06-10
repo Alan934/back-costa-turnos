@@ -1,0 +1,30 @@
+# dependencies
+/node_modules
+
+# build
+/dist
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.*.local
+.env.local
+
+# coverage
+/coverage
+
+# IDE
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# docker volumes (local)
+/.data

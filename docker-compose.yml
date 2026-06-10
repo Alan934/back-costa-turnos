@@ -1,0 +1,83 @@
+# Infraestructura local de desarrollo.
+# En produccion (Coolify) Postgres y Redis se proveen como recursos del panel;
+# este compose es solo para correr el stack completo en tu maquina.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: turnerito_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-turnerito}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-turnerito}
+      POSTGRES_DB: ${DB_NAME:-turnerito}
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - ./.data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-turnerito} -d ${DB_NAME:-turnerito}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: turnerito_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - ./.data/redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: turnerito_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - '${MINIO_PORT:-9000}:9000'
+      - '9001:9001'
+    volumes:
+      - ./.data/minio:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      target: runtime
+    container_name: turnerito_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+    env_file:
+      - .env
+    ports:
+      - '${PORT:-3000}:3000'
+    profiles:
+      - full
