@@ -5,7 +5,10 @@
 export interface AppConfig {
   env: string;
   port: number;
+  /** URL publica del backend (para webhooks/callbacks server-side). */
   appUrl: string;
+  /** URL del frontend (a donde redirigen los callbacks de Google/MercadoPago). */
+  frontUrl: string;
   corsOrigins: string[] | boolean;
   defaultTimezone: string;
   logLevel: string;
@@ -118,6 +121,7 @@ export default () => ({
     env: process.env.NODE_ENV ?? 'development',
     port: parseInt(process.env.PORT ?? '3000', 10),
     appUrl: process.env.APP_URL ?? 'http://localhost:3000',
+    frontUrl: process.env.FRONT_URL ?? 'http://localhost:5173',
     corsOrigins: parseCors(process.env.CORS_ORIGINS ?? '*'),
     defaultTimezone: process.env.DEFAULT_TIMEZONE ?? 'America/Argentina/Buenos_Aires',
     logLevel: process.env.LOG_LEVEL ?? 'info',
@@ -161,7 +165,8 @@ export default () => ({
     oauthRedirectUri:
       process.env.MP_OAUTH_REDIRECT_URI ?? 'http://localhost:3000/payments/mp/oauth/callback',
     marketplaceFeePercent: parseFloat(process.env.MP_MARKETPLACE_FEE_PERCENT ?? '0'),
-    frontReturnUrl: process.env.MP_FRONT_RETURN_URL ?? process.env.APP_URL ?? 'http://localhost:3000',
+    frontReturnUrl:
+      process.env.MP_FRONT_RETURN_URL ?? process.env.FRONT_URL ?? 'http://localhost:5173',
   } satisfies MercadoPagoConfig,
 
   subscription: {

@@ -8,7 +8,12 @@ import { AppModule } from './app.module';
 import { AppConfig } from './config/configuration';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
-import { buildSwaggerConfig, swaggerDocumentOptions, swaggerUiOptions } from './swagger';
+import {
+  applyApiVersionPrefix,
+  buildSwaggerConfig,
+  swaggerDocumentOptions,
+  swaggerUiOptions,
+} from './swagger';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -39,7 +44,9 @@ async function bootstrap(): Promise<void> {
   app.useWebSocketAdapter(redisIoAdapter);
 
   // Swagger / OpenAPI (config compartida con el script de export, ver src/swagger.ts)
-  const document = SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions);
+  const document = applyApiVersionPrefix(
+    SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions),
+  );
   SwaggerModule.setup('api/docs', app, document, swaggerUiOptions);
 
   app.enableShutdownHooks();

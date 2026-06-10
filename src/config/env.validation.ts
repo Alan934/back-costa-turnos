@@ -9,6 +9,7 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
   PORT: Joi.number().default(3000),
   APP_URL: Joi.string().uri().default('http://localhost:3000'),
+  FRONT_URL: Joi.string().uri().default('http://localhost:5173'),
   CORS_ORIGINS: Joi.string().default('*'),
   DEFAULT_TIMEZONE: Joi.string().default('America/Argentina/Buenos_Aires'),
   LOG_LEVEL: Joi.string().valid('trace', 'debug', 'info', 'warn', 'error', 'fatal').default('info'),

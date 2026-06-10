@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { buildSwaggerConfig, swaggerDocumentOptions } from './swagger';
+import { applyApiVersionPrefix, buildSwaggerConfig, swaggerDocumentOptions } from './swagger';
 
 /**
  * Genera el contrato OpenAPI sin levantar el servidor HTTP. Construye la app en
@@ -16,7 +16,9 @@ async function generate(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger: false });
   await app.init();
 
-  const document = SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions);
+  const document = applyApiVersionPrefix(
+    SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions),
+  );
 
   const outPath = resolve(__dirname, '..', '..', 'packages', 'contract', 'openapi.json');
   mkdirSync(dirname(outPath), { recursive: true });

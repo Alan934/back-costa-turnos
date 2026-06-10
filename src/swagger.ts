@@ -34,3 +34,29 @@ export const swaggerDocumentOptions = {
 export const swaggerUiOptions: SwaggerCustomOptions = {
   customSiteTitle: 'Turnerito API Docs',
 };
+
+/**
+ * Prefijos de rutas VERSION_NEUTRAL (sin /v1). Todo lo demas es version 1 y se
+ * sirve bajo /v1. NestJS no inyecta el prefijo de version en el documento
+ * OpenAPI, asi que lo agregamos aca para que el contrato refleje las URLs reales.
+ */
+const NEUTRAL_PREFIXES = ['/auth', '/health', '/r/', '/payments/mp/oauth'];
+
+function isNeutralPath(path: string): boolean {
+  return NEUTRAL_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(p));
+}
+
+/**
+ * Reescribe los paths del documento para que coincidan EXACTAMENTE con lo que
+ * sirve el backend: las rutas versionadas quedan bajo /v1 y las neutrales sin
+ * prefijo. Asi el front usa baseURL = raiz del backend y cada path es completo.
+ */
+export function applyApiVersionPrefix(document: OpenAPIObject, version = 'v1'): OpenAPIObject {
+  const rewritten: OpenAPIObject['paths'] = {};
+  for (const [path, item] of Object.entries(document.paths)) {
+    const newPath = isNeutralPath(path) ? path : `/${version}${path}`;
+    rewritten[newPath] = item;
+  }
+  document.paths = rewritten;
+  return document;
+}

@@ -80,8 +80,10 @@ async function seed(): Promise<void> {
       }),
     );
 
+    const trialDays = parseInt(process.env.SUBSCRIPTION_TRIAL_DAYS ?? '15', 10);
+    const priceCents = parseInt(process.env.SUBSCRIPTION_PRICE_CENTS ?? '1100000', 10);
     const now = new Date();
-    const trialEnds = new Date(now.getTime() + 30 * 86_400_000);
+    const trialEnds = new Date(now.getTime() + trialDays * 86_400_000);
     await manager.save(
       manager.create(Subscription, {
         professionalId: professional.id,
@@ -89,7 +91,7 @@ async function seed(): Promise<void> {
         trialEndsAt: trialEnds,
         currentPeriodStart: now,
         currentPeriodEnd: trialEnds,
-        amountCents: 1_100_000,
+        amountCents: priceCents,
       }),
     );
 

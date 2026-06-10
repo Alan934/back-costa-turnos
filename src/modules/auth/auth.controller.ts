@@ -112,8 +112,8 @@ export class AuthController {
     const profile = req.user as unknown as GoogleProfileInput;
     const tokens = await this.auth.validateGoogleUser(profile);
     const appConfig = this.config.getOrThrow<AppConfig>('app');
-    // Redirige al frontend con los tokens (ajustar a la URL real del cliente).
-    const url = new URL('/auth/callback', appConfig.appUrl);
+    // Redirige al FRONTEND (FRONT_URL) con los tokens en el query.
+    const url = new URL('/auth/callback', appConfig.frontUrl);
     url.searchParams.set('access_token', tokens.accessToken);
     url.searchParams.set('refresh_token', tokens.refreshToken);
     res.redirect(url.toString());
