@@ -28,3 +28,6 @@ Thumbs.db
 
 # docker volumes (local)
 /.data
+
+# otros
+modelo-de-datos.md
