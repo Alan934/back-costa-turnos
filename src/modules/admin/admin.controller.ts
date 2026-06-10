@@ -7,6 +7,8 @@ import { AdminGuard } from '@/common/guards/admin.guard';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { AdminMetricsService } from './admin-metrics.service';
+import { AdminMetricsDto } from './dto/admin-metrics.dto';
 
 /**
  * Endpoints de administracion de la plataforma (solo platform admin).
@@ -18,11 +20,20 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 export class AdminController {
   constructor(
     private readonly subscriptions: SubscriptionsService,
+    private readonly adminMetrics: AdminMetricsService,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Subscription)
     private readonly subs: Repository<Subscription>,
   ) {}
+
+  @ApiOperation({ summary: 'Metricas de la plataforma (agregado de todos los tenants)' })
+  @ApiResponse({ status: 200, type: AdminMetricsDto })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @Get('metrics')
+  metrics(): Promise<AdminMetricsDto> {
+    return this.adminMetrics.getMetrics();
+  }
 
   @ApiOperation({ summary: 'Listar profesionales con su suscripcion' })
   @ApiResponse({ status: 200, description: 'Array de { professional, subscription }' })
