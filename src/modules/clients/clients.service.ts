@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ProfessionalClientStatus } from '@/common/enums';
+import { In, Repository } from 'typeorm';
+import { AppointmentStatus, ProfessionalClientStatus } from '@/common/enums';
 import { PersonsService } from '@/modules/identity/persons.service';
+import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { ProfessionalClient } from './entities/professional-client.entity';
 import { FichaField } from './entities/ficha-field.entity';
 import { ClientNote } from './entities/client-note.entity';
+import { EnrichedClientDto } from './dto/enriched-client.dto';
 import {
   CreateClientDto,
   CreateClientNoteDto,
@@ -13,6 +15,11 @@ import {
   UpdateClientFichaDto,
   UpdateFichaFieldDto,
 } from './dto/client.dto';
+
+interface VisitStats {
+  count: number;
+  last: Date | null;
+}
 
 @Injectable()
 export class ClientsService {
@@ -23,6 +30,8 @@ export class ClientsService {
     private readonly fichaFields: Repository<FichaField>,
     @InjectRepository(ClientNote)
     private readonly notes: Repository<ClientNote>,
+    @InjectRepository(Appointment)
+    private readonly appointments: Repository<Appointment>,
     private readonly persons: PersonsService,
   ) {}
 
@@ -81,14 +90,39 @@ export class ClientsService {
   }
 
   // ---- Clients (membership) ----
-  listClients(tenantId: string): Promise<ProfessionalClient[]> {
-    return this.clients.find({
+  /** Lista de clientes con datos de la persona embebidos. `q` busca por nombre/email/telefono. */
+  async listClients(tenantId: string, q?: string): Promise<EnrichedClientDto[]> {
+    const all = await this.clients.find({
       where: { professionalId: tenantId },
       relations: { person: true },
       order: { createdAt: 'DESC' },
     });
+
+    const term = q?.trim().toLowerCase();
+    const filtered = term
+      ? all.filter((c) => {
+          const p = c.person;
+          return [p?.fullName, p?.email, p?.phone]
+            .filter(Boolean)
+            .some((v) => v!.toLowerCase().includes(term));
+        })
+      : all;
+
+    const visits = await this.computeVisits(
+      tenantId,
+      filtered.map((c) => c.personId),
+    );
+    return filtered.map((c) => this.toEnriched(c, visits.get(c.personId)));
   }
 
+  /** Detalle de un cliente, enriquecido. */
+  async getClientEnriched(tenantId: string, id: string): Promise<EnrichedClientDto> {
+    const client = await this.getClient(tenantId, id);
+    const visits = await this.computeVisits(tenantId, [client.personId]);
+    return this.toEnriched(client, visits.get(client.personId));
+  }
+
+  /** Versión interna (entidad cruda con persona) usada por otras operaciones. */
   async getClient(tenantId: string, id: string): Promise<ProfessionalClient> {
     const client = await this.clients.findOne({
       where: { id, professionalId: tenantId },
@@ -98,7 +132,46 @@ export class ClientsService {
     return client;
   }
 
-  async createClient(tenantId: string, dto: CreateClientDto): Promise<ProfessionalClient> {
+  /** visitCount/lastVisitAt por persona, contando turnos atendidos (done) del tenant. */
+  private async computeVisits(
+    tenantId: string,
+    personIds: string[],
+  ): Promise<Map<string, VisitStats>> {
+    const ids = [...new Set(personIds)];
+    const map = new Map<string, VisitStats>();
+    if (ids.length === 0) return map;
+
+    const done = await this.appointments.find({
+      where: { professionalId: tenantId, personId: In(ids), status: AppointmentStatus.Done },
+      select: ['personId', 'startAt'],
+    });
+    for (const a of done) {
+      const cur = map.get(a.personId) ?? { count: 0, last: null };
+      cur.count += 1;
+      if (!cur.last || a.startAt > cur.last) cur.last = a.startAt;
+      map.set(a.personId, cur);
+    }
+    return map;
+  }
+
+  private toEnriched(client: ProfessionalClient, visits?: VisitStats): EnrichedClientDto {
+    const p = client.person;
+    return {
+      id: client.id,
+      personId: client.personId,
+      status: client.status,
+      fichaValues: client.fichaValues,
+      createdAt: client.createdAt.toISOString(),
+      updatedAt: client.updatedAt.toISOString(),
+      fullName: p?.fullName ?? '',
+      email: p?.email ?? null,
+      phone: p?.phone ?? null,
+      visitCount: visits?.count ?? 0,
+      lastVisitAt: visits?.last ? visits.last.toISOString() : null,
+    };
+  }
+
+  async createClient(tenantId: string, dto: CreateClientDto): Promise<EnrichedClientDto> {
     const fichaValues = dto.fichaValues ?? {};
     await this.validateFichaValues(tenantId, fichaValues);
 
@@ -121,24 +194,27 @@ export class ClientsService {
       fichaValues,
       status: ProfessionalClientStatus.Active,
     });
-    return this.clients.save(client);
+    const saved = await this.clients.save(client);
+    return this.getClientEnriched(tenantId, saved.id);
   }
 
   async updateClientFicha(
     tenantId: string,
     id: string,
     dto: UpdateClientFichaDto,
-  ): Promise<ProfessionalClient> {
+  ): Promise<EnrichedClientDto> {
     const client = await this.getClient(tenantId, id);
     await this.validateFichaValues(tenantId, dto.fichaValues);
     client.fichaValues = dto.fichaValues;
-    return this.clients.save(client);
+    await this.clients.save(client);
+    return this.getClientEnriched(tenantId, id);
   }
 
-  async archiveClient(tenantId: string, id: string): Promise<ProfessionalClient> {
+  async archiveClient(tenantId: string, id: string): Promise<EnrichedClientDto> {
     const client = await this.getClient(tenantId, id);
     client.status = ProfessionalClientStatus.Archived;
-    return this.clients.save(client);
+    await this.clients.save(client);
+    return this.getClientEnriched(tenantId, id);
   }
 
   // ---- Notes (privadas) ----

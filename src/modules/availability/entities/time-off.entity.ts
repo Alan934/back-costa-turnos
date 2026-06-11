@@ -25,7 +25,7 @@ export class TimeOff extends BaseEntity {
   @Column({ name: 'end_at', type: 'timestamptz' })
   endAt!: Date;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })
   reason!: string | null;
 }

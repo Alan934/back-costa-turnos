@@ -109,7 +109,6 @@ export class MeService {
     const service = maps.services.get(a.serviceId);
     const staff = maps.staff.get(a.staffId);
     const professional = maps.professionals.get(a.professionalId);
-    const settings = professional?.publicPageSettings as { address?: string } | undefined;
 
     return {
       id: a.id,
@@ -123,7 +122,7 @@ export class MeService {
       business: {
         name: professional?.businessName ?? '',
         slug: professional?.slug ?? '',
-        address: settings?.address ?? null,
+        address: professional?.address ?? null,
         cancellationWindowHours: professional?.cancellationWindowHours ?? 0,
       },
     };

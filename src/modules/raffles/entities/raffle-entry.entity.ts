@@ -29,7 +29,7 @@ export class RaffleEntry extends BaseCreatedEntity {
   @Column({ type: 'integer' })
   number!: number;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })
   label!: string | null;
 }

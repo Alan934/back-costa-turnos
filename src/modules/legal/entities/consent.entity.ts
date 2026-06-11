@@ -34,7 +34,7 @@ export class Consent extends BaseCreatedEntity {
   @Column({ name: 'accepted_at', type: 'timestamptz' })
   acceptedAt!: Date;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'inet', nullable: true })
   ip!: string | null;
 }

@@ -53,6 +53,7 @@ export class ProfessionalsService {
           businessName: dto.businessName,
           slug: dto.slug,
           timezone,
+          address: dto.address ?? null,
         }),
       );
 

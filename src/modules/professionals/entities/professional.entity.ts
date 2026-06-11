@@ -38,6 +38,11 @@ export class Professional extends BaseEntity {
   @Column({ type: 'text' })
   timezone!: string;
 
+  /** Direccion del negocio (para la pagina publica y "mis turnos" del cliente). */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ type: 'text', nullable: true })
+  address!: string | null;
+
   @ApiProperty({ enum: DepositMode, enumName: 'DepositMode' })
   @Column({
     name: 'default_deposit_mode',
@@ -58,7 +63,7 @@ export class Professional extends BaseEntity {
 
   // ---- Conexion MercadoPago (OAuth marketplace): cobra las señas/turnos a su cuenta ----
   /** user_id de MercadoPago del profesional (collector). */
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'mp_user_id', type: 'text', nullable: true })
   mpUserId!: string | null;
 
@@ -70,7 +75,7 @@ export class Professional extends BaseEntity {
   @Column({ name: 'mp_refresh_token', type: 'text', nullable: true, select: false })
   mpRefreshToken!: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'mp_public_key', type: 'text', nullable: true })
   mpPublicKey!: string | null;
 

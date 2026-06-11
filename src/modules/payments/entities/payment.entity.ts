@@ -71,7 +71,7 @@ export class Payment extends BaseEntity {
   status!: PaymentStatus;
 
   /** id de pago de MercadoPago. */
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'mercadopago_ref', type: 'text', nullable: true })
   mercadopagoRef!: string | null;
 

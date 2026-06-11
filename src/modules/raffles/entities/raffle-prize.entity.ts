@@ -19,7 +19,7 @@ export class RafflePrize extends BaseCreatedEntity {
   name!: string;
 
   /** Objeto en MinIO. */
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'photo_key', type: 'text', nullable: true })
   photoKey!: string | null;
 

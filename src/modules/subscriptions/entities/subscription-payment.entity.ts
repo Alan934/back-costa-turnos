@@ -50,7 +50,7 @@ export class SubscriptionPayment extends BaseCreatedEntity {
   })
   method!: PaymentMethod | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'mercadopago_ref', type: 'text', nullable: true })
   mercadopagoRef!: string | null;
 

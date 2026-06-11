@@ -8,9 +8,10 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { TenantGuard } from '@/common/guards/tenant.guard';
@@ -19,9 +20,9 @@ import { Roles } from '@/common/decorators/roles.decorator';
 import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
 import { ClientsService } from './clients.service';
-import { ProfessionalClient } from './entities/professional-client.entity';
 import { ClientNote } from './entities/client-note.entity';
 import { FichaField } from './entities/ficha-field.entity';
+import { EnrichedClientDto } from './dto/enriched-client.dto';
 import {
   CreateClientDto,
   CreateClientNoteDto,
@@ -85,17 +86,18 @@ export class ClientsController {
   }
 
   // ---- Clients ----
-  @ApiOperation({ summary: 'Listar clientes' })
-  @ApiResponse({ status: 200, type: ProfessionalClient, isArray: true })
+  @ApiOperation({ summary: 'Listar clientes (con datos de la persona)' })
+  @ApiResponse({ status: 200, type: EnrichedClientDto, isArray: true })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiQuery({ name: 'q', required: false, description: 'Busca por nombre, email o telefono' })
   @Get()
-  listClients(@CurrentTenant() tenantId: string) {
-    return this.clients.listClients(tenantId);
+  listClients(@CurrentTenant() tenantId: string, @Query('q') q?: string) {
+    return this.clients.listClients(tenantId, q);
   }
 
   @ApiOperation({ summary: 'Crear un cliente' })
-  @ApiResponse({ status: 201, type: ProfessionalClient })
+  @ApiResponse({ status: 201, type: EnrichedClientDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
@@ -104,18 +106,18 @@ export class ClientsController {
     return this.clients.createClient(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Obtener un cliente por id' })
-  @ApiResponse({ status: 200, type: ProfessionalClient })
+  @ApiOperation({ summary: 'Obtener un cliente por id (con datos de la persona)' })
+  @ApiResponse({ status: 200, type: EnrichedClientDto })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Get(':id')
   getClient(@CurrentTenant() tenantId: string, @Param('id') id: string) {
-    return this.clients.getClient(tenantId, id);
+    return this.clients.getClientEnriched(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Actualizar la ficha de un cliente' })
-  @ApiResponse({ status: 200, type: ProfessionalClient })
+  @ApiResponse({ status: 200, type: EnrichedClientDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
@@ -130,7 +132,7 @@ export class ClientsController {
   }
 
   @ApiOperation({ summary: 'Archivar un cliente' })
-  @ApiResponse({ status: 200, type: ProfessionalClient })
+  @ApiResponse({ status: 200, type: EnrichedClientDto })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @ApiResponse({ status: 404, description: 'No encontrado' })

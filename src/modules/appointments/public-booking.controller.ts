@@ -63,6 +63,7 @@ export class PublicBookingController {
       businessName: professional.businessName,
       slug: professional.slug,
       timezone: professional.timezone,
+      address: professional.address,
       settings: professional.publicPageSettings,
       services,
     };

@@ -20,6 +20,11 @@ export class OnboardProfessionalDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  @ApiPropertyOptional({ example: 'Belgrano 245, Costa de Araujo, Mendoza' })
+  @IsOptional()
+  @IsString()
+  address?: string;
 }
 
 export class UpdateProfessionalDto {
@@ -32,6 +37,11 @@ export class UpdateProfessionalDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  @ApiPropertyOptional({ example: 'Belgrano 245, Costa de Araujo, Mendoza' })
+  @IsOptional()
+  @IsString()
+  address?: string;
 
   @ApiPropertyOptional({ enum: DepositMode })
   @IsOptional()

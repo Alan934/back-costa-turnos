@@ -24,7 +24,7 @@ export class AuditLog extends BaseCreatedEntity {
   @Column({ type: 'text' })
   action!: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })
   entity!: string | null;
 
@@ -36,7 +36,7 @@ export class AuditLog extends BaseCreatedEntity {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'inet', nullable: true })
   ip!: string | null;
 }

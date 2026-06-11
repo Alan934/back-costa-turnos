@@ -24,11 +24,11 @@ export class Person extends BaseEntity {
   @Column({ name: 'full_name', type: 'text' })
   fullName!: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })
   phone!: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'citext', nullable: true })
   email!: string | null;
 }

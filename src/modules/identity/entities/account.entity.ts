@@ -15,11 +15,11 @@ export class Account extends BaseEntity {
   email!: string;
 
   /** NULL = cuenta sin contrasena (cargada por un profesional, aun no reclamada). */
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'password_hash', type: 'text', nullable: true })
   passwordHash!: string | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Index('uq_account_google_id', { unique: true, where: 'google_id IS NOT NULL' })
   @Column({ name: 'google_id', type: 'text', nullable: true })
   googleId!: string | null;
@@ -46,7 +46,7 @@ export class Account extends BaseEntity {
   status!: AccountStatus;
 
   /** Hash del refresh token activo (rotativo). NULL = sin sesion. */
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'refresh_token_hash', type: 'text', nullable: true })
   refreshTokenHash!: string | null;
 }

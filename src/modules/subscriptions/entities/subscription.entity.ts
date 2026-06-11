@@ -48,7 +48,7 @@ export class Subscription extends BaseEntity {
   @Column({ name: 'amount_cents', type: 'integer' })
   amountCents!: number;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'mercadopago_preapproval_id', type: 'text', nullable: true })
   mercadopagoPreapprovalId!: string | null;
 }

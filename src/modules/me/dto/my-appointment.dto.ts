@@ -6,7 +6,7 @@ export class MyAppointmentBusinessDto {
   name!: string;
   @ApiProperty()
   slug!: string;
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: String, nullable: true })
   address!: string | null;
   @ApiProperty({ type: Number })
   cancellationWindowHours!: number;
