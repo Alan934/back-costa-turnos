@@ -24,6 +24,7 @@
     "migration:generate": "npm run typeorm -- migration:generate",
     "migration:create": "typeorm-ts-node-commonjs migration:create",
     "migration:run": "npm run typeorm -- migration:run",
+    "migration:run:prod": "node ./node_modules/typeorm/cli.js -d dist/database/data-source.js migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
     "seed": "ts-node -r tsconfig-paths/register src/database/seeds/run-seed.ts",
     "openapi:gen": "ts-node -r tsconfig-paths/register src/openapi.ts",
