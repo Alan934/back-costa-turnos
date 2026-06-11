@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,6 +14,7 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { AccountStatus, AppRole, VerificationPurpose } from '@/common/enums';
 import { JwtPayload } from '@/common/types/request-user';
+import { MailerService } from '@/modules/mailer/mailer.service';
 import { TokensService, IssuedTokens } from './tokens.service';
 import { VerificationTokenService } from './verification-token.service';
 import {
@@ -33,13 +33,12 @@ export interface GoogleProfileInput {
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-
   constructor(
     private readonly accounts: AccountsService,
     private readonly persons: PersonsService,
     private readonly tokens: TokensService,
     private readonly verification: VerificationTokenService,
+    private readonly mailer: MailerService,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Staff)
@@ -209,7 +208,7 @@ export class AuthService {
     return this.issueAndPersist(account);
   }
 
-  /** Genera un codigo de verificacion/reclamo y lo "envia" (stub log/notif). */
+  /** Genera un codigo de verificacion/reclamo y lo envia por email. */
   async requestCode(email: string, purpose: VerificationPurpose): Promise<void> {
     const account = await this.accounts.findByEmail(email);
     const { code } = await this.verification.issue({
@@ -217,8 +216,7 @@ export class AuthService {
       purpose,
       accountId: account?.id ?? null,
     });
-    // En produccion esto se encola como Notification (email). Por ahora, log.
-    this.logger.debug(`Codigo ${purpose} para ${email}: ${code}`);
+    await this.mailer.sendVerificationCode(email, purpose, code);
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<void> {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from './entities/account.entity';
@@ -55,5 +55,14 @@ export class AccountsService {
 
   async markEmailVerified(id: string): Promise<void> {
     await this.accounts.update({ id }, { emailVerifiedAt: new Date() });
+  }
+
+  /** Bloquea o reactiva una cuenta (status). Al bloquear, revoca la sesion. */
+  async setStatus(id: string, status: AccountStatus): Promise<Account> {
+    const account = await this.findById(id);
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+    account.status = status;
+    if (status === AccountStatus.Blocked) account.refreshTokenHash = null;
+    return this.accounts.save(account);
   }
 }
