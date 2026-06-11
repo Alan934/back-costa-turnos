@@ -50,7 +50,7 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup('api/docs', app, document, swaggerUiOptions);
 
   app.enableShutdownHooks();
-  await app.listen(appConfig.port);
+  await app.listen(appConfig.port, '0.0.0.0');
   app.get(Logger).log(`Turnerito API escuchando en :${appConfig.port}`, 'Bootstrap');
 }
 
