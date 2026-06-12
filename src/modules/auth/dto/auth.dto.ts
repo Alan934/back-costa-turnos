@@ -1,5 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, MinLength } from 'class-validator';
+import { AppRole } from '@/common/enums';
 
 export class RegisterDto {
   @ApiProperty({ example: 'dueno@peluqueria.com' })
@@ -94,4 +95,28 @@ export class AuthTokensDto {
   @ApiProperty({ required: false })
   @IsOptional()
   expiresIn?: string;
+}
+
+/** Respuesta de GET /auth/me: datos del usuario autenticado. */
+export class AuthMeDto {
+  @ApiProperty({ format: 'uuid', description: 'account.id' })
+  sub!: string;
+
+  @ApiProperty()
+  email!: string;
+
+  @ApiProperty({ type: Boolean, description: 'true si verificó su email' })
+  emailVerified!: boolean;
+
+  @ApiProperty({ enum: AppRole, enumName: 'AppRole', isArray: true })
+  roles!: AppRole[];
+
+  @ApiProperty({ type: Boolean })
+  isPlatformAdmin!: boolean;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'tenant que administra' })
+  professionalId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  staffId?: string;
 }

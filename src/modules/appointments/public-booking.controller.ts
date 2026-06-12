@@ -17,6 +17,7 @@ import { AvailabilityService } from '@/modules/availability/availability.service
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 import { AppointmentsService } from './appointments.service';
 import { Appointment } from './entities/appointment.entity';
+import { PublicPageDto } from './dto/public-page.dto';
 import { BookAppointmentDto, BookWithDepositDto } from './dto/appointment.dto';
 
 /**
@@ -49,16 +50,18 @@ export class PublicBookingController {
   }
 
   @ApiOperation({ summary: 'Obtener la pagina publica de reservas' })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Objeto computado { businessName, slug, timezone, settings, services[] } de la pagina publica.',
-  })
+  @ApiResponse({ status: 200, type: PublicPageDto })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Get()
-  async page(@Param('slug') slug: string) {
+  async page(@Param('slug') slug: string): Promise<PublicPageDto> {
     const professional = await this.professionals.findBySlug(slug);
-    const services = await this.catalog.listActive(professional.id);
+    const [services, allStaff] = await Promise.all([
+      this.catalog.listActive(professional.id),
+      this.professionals.listStaff(professional.id),
+    ]);
+    const staff = allStaff
+      .filter((s) => s.isActive)
+      .map((s) => ({ id: s.id, displayName: s.displayName }));
     return {
       businessName: professional.businessName,
       slug: professional.slug,
@@ -66,6 +69,7 @@ export class PublicBookingController {
       address: professional.address,
       settings: professional.publicPageSettings,
       services,
+      staff,
     };
   }
 

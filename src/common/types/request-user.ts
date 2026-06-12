@@ -6,6 +6,8 @@ export interface JwtPayload {
   /** account.id */
   sub: string;
   email: string;
+  /** true si la cuenta verificó su email (account.email_verified_at != null). */
+  emailVerified: boolean;
   roles: AppRole[];
   isPlatformAdmin: boolean;
   /** tenant que administra (professional/staff). */

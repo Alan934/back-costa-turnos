@@ -71,11 +71,20 @@ export class AuthService {
     return {
       sub: account.id,
       email: account.email,
+      emailVerified: account.emailVerifiedAt != null,
       roles,
       isPlatformAdmin: account.isPlatformAdmin,
       professionalId,
       staffId,
     };
+  }
+
+  /** Datos frescos del usuario autenticado (para GET /auth/me): recarga la cuenta
+   *  para reflejar emailVerified al instante (no el valor del token, que puede ser viejo). */
+  async getMe(accountId: string): Promise<JwtPayload> {
+    const account = await this.accounts.findById(accountId);
+    if (!account) throw new UnauthorizedException('Cuenta no encontrada');
+    return this.buildPayload(account);
   }
 
   private async issueAndPersist(account: Account): Promise<IssuedTokens> {

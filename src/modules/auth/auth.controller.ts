@@ -15,12 +15,13 @@ import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Public } from '@/common/decorators/public.decorator';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
-import { AuthenticatedRequest, RequestUser } from '@/common/types/request-user';
+import { AuthenticatedRequest } from '@/common/types/request-user';
 import { VerificationPurpose } from '@/common/enums';
 import { AppConfig } from '@/config/configuration';
 import { AuthService, GoogleProfileInput } from './auth.service';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
 import {
+  AuthMeDto,
   AuthTokensDto,
   ClaimAccountDto,
   LoginDto,
@@ -79,15 +80,12 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Obtener el usuario autenticado' })
-  @ApiResponse({
-    status: 200,
-    description: 'Datos del usuario autenticado (sub, email, rol y tenant).',
-  })
+  @ApiResponse({ status: 200, type: AuthMeDto })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiBearerAuth()
   @Get('me')
-  me(@CurrentAccount() user: RequestUser): RequestUser {
-    return user;
+  me(@CurrentAccount('sub') accountId: string): Promise<AuthMeDto> {
+    return this.auth.getMe(accountId);
   }
 
   // ---- Google OAuth ----
