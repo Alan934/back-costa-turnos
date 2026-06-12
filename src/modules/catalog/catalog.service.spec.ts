@@ -2,9 +2,8 @@ import { BadRequestException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { CatalogService } from './catalog.service';
 import { Service } from './entities/service.entity';
-import { DepositMode } from '@/common/enums';
 
-describe('CatalogService (deposit consistency)', () => {
+describe('CatalogService (opciones de pago)', () => {
   let service: CatalogService;
   let repo: { create: jest.Mock; save: jest.Mock };
 
@@ -16,36 +15,51 @@ describe('CatalogService (deposit consistency)', () => {
     service = new CatalogService(repo as unknown as Repository<Service>);
   });
 
-  it('rechaza deposit_mode=required sin monto de sena', () => {
+  it('rechaza allowDeposit sin monto de seña', () => {
     expect(() =>
       service.create('tenant-1', {
         name: 'Color',
         durationMinutes: 60,
         priceCents: 100000,
-        depositMode: DepositMode.Required,
+        allowDeposit: true,
       }),
     ).toThrow(BadRequestException);
   });
 
-  it('acepta deposit_mode=none sin monto', async () => {
+  it('acepta solo sin pago (default)', async () => {
     const result = await service.create('tenant-1', {
       name: 'Corte',
       durationMinutes: 30,
       priceCents: 50000,
-      depositMode: DepositMode.None,
     });
     expect(result.name).toBe('Corte');
+    expect(result.allowNoPayment).toBe(true);
     expect(repo.save).toHaveBeenCalled();
   });
 
-  it('acepta hybrid con monto de sena', async () => {
+  it('acepta combinación seña + pago completo + sin pago', async () => {
     const result = await service.create('tenant-1', {
       name: 'Corte premium',
       durationMinutes: 45,
       priceCents: 80000,
-      depositMode: DepositMode.Hybrid,
+      allowDeposit: true,
+      allowFullPayment: true,
+      allowNoPayment: true,
       depositAmountCents: 20000,
     });
+    expect(result.allowDeposit).toBe(true);
+    expect(result.allowFullPayment).toBe(true);
     expect(result.depositAmountCents).toBe(20000);
+  });
+
+  it('rechaza si no habilita ninguna opción', () => {
+    expect(() =>
+      service.create('tenant-1', {
+        name: 'Vacio',
+        durationMinutes: 30,
+        priceCents: 50000,
+        allowNoPayment: false,
+      }),
+    ).toThrow(BadRequestException);
   });
 });

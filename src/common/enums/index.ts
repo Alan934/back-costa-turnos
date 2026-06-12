@@ -79,6 +79,12 @@ export enum PaymentType {
   Service = 'service',
 }
 
+/** Opción de pago elegida por el cliente al reservar pagando. */
+export enum PaymentOption {
+  Deposit = 'deposit',
+  Full = 'full',
+}
+
 export enum PaymentMethod {
   Cash = 'cash',
   MercadoPago = 'mercadopago',

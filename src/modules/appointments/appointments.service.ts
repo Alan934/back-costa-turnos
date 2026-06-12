@@ -10,10 +10,10 @@ import {
   AppointmentStatus,
   CancellationReason,
   CreatedVia,
-  DepositMode,
   NotificationChannel,
   NotificationType,
   PaymentMethod,
+  PaymentOption,
   PaymentStatus,
   PaymentType,
 } from '@/common/enums';
@@ -92,10 +92,10 @@ export class AppointmentsService {
   }
 
   /**
-   * Reserva un turno SIN pago de sena.
-   * - none   -> confirmed
-   * - required-> requested (queda a la espera del pago de sena)
-   * - hybrid -> confirmed + is_provisional (puede ser desplazado por una sena)
+   * Reserva un turno SIN pagar.
+   * - Si el servicio NO permite "sin pago" -> rechaza (hay que pagar seña o total).
+   * - Si además hay una opción paga habilitada -> queda provisional (desplazable
+   *   por alguien que pague). Si solo permite "sin pago" -> confirmado firme.
    */
   async book(
     tenantId: string,
@@ -103,6 +103,11 @@ export class AppointmentsService {
     createdVia: CreatedVia,
   ): Promise<Appointment> {
     const service = await this.loadService(tenantId, dto.serviceId);
+    if (!service.allowNoPayment) {
+      throw new BadRequestException(
+        'Este servicio requiere pago (seña o total) para reservar el turno',
+      );
+    }
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
     const personId = await this.resolvePersonId(dto);
@@ -111,27 +116,12 @@ export class AppointmentsService {
     // Cualquier turno activo (incluido un provisional) bloquea una reserva casual.
     if (conflicts.length > 0) {
       throw new ConflictException(
-        'El horario ya no esta disponible. Si hay una reserva provisional, podes tomarlo pagando la sena.',
+        'El horario ya no esta disponible. Si hay una reserva provisional, podes tomarlo pagando.',
       );
     }
 
-    let status: AppointmentStatus;
-    let isProvisional = false;
-    switch (service.depositMode) {
-      case DepositMode.None:
-        status = AppointmentStatus.Confirmed;
-        break;
-      case DepositMode.Required:
-        status = AppointmentStatus.Requested;
-        break;
-      case DepositMode.Hybrid:
-        status = AppointmentStatus.Confirmed;
-        isProvisional = true;
-        break;
-      default:
-        status = AppointmentStatus.Requested;
-    }
-
+    // Provisional (desplazable) solo si el servicio también admite pago.
+    const hasPaidOption = service.allowDeposit || service.allowFullPayment;
     const appointment = this.appointments.create({
       professionalId: tenantId,
       staffId: dto.staffId,
@@ -139,8 +129,8 @@ export class AppointmentsService {
       serviceId: service.id,
       startAt,
       endAt,
-      status,
-      isProvisional,
+      status: AppointmentStatus.Confirmed,
+      isProvisional: hasPaidOption,
       createdVia,
     });
     return this.appointments.save(appointment);
@@ -157,13 +147,28 @@ export class AppointmentsService {
     dto: BookWithDepositDto,
   ): Promise<{ appointment: Appointment; payment: Payment }> {
     const service = await this.loadService(tenantId, dto.serviceId);
-    if (service.depositMode === DepositMode.None) {
-      throw new BadRequestException('Este servicio no requiere ni admite sena');
+    const option = dto.paymentOption ?? PaymentOption.Deposit;
+
+    // Resuelve monto y tipo según la opción elegida (seña o pago completo).
+    let amountCents: number;
+    let paymentType: PaymentType;
+    if (option === PaymentOption.Full) {
+      if (!service.allowFullPayment) {
+        throw new BadRequestException('Este servicio no admite pago completo');
+      }
+      amountCents = service.priceCents;
+      paymentType = PaymentType.Service;
+    } else {
+      if (!service.allowDeposit) {
+        throw new BadRequestException('Este servicio no admite seña');
+      }
+      if (!service.depositAmountCents || service.depositAmountCents <= 0) {
+        throw new BadRequestException('El servicio no tiene monto de seña configurado');
+      }
+      amountCents = service.depositAmountCents;
+      paymentType = PaymentType.Deposit;
     }
-    const depositAmountCents = service.depositAmountCents;
-    if (!depositAmountCents || depositAmountCents <= 0) {
-      throw new BadRequestException('El servicio no tiene monto de sena configurado');
-    }
+
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
     const personId = await this.resolvePersonId(dto);
@@ -216,8 +221,8 @@ export class AppointmentsService {
           professionalId: tenantId,
           appointmentId: appointment.id,
           personId,
-          type: PaymentType.Deposit,
-          amountCents: depositAmountCents,
+          type: paymentType,
+          amountCents,
           method: dto.method,
           status: isCash ? PaymentStatus.Paid : PaymentStatus.Pending,
           paidAt: isCash ? new Date() : null,

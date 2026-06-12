@@ -1,9 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DepositMode } from '@/common/enums';
 import { Service } from './entities/service.entity';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
+
+interface PaymentFlags {
+  allowDeposit: boolean;
+  allowFullPayment: boolean;
+  allowNoPayment: boolean;
+  depositAmountCents: number | null;
+}
 
 @Injectable()
 export class CatalogService {
@@ -12,16 +18,15 @@ export class CatalogService {
     private readonly services: Repository<Service>,
   ) {}
 
-  private assertDepositConsistency(
-    depositMode: DepositMode | undefined,
-    depositAmountCents: number | null | undefined,
-  ): void {
-    if (depositMode && depositMode !== DepositMode.None) {
-      if (depositAmountCents == null || depositAmountCents <= 0) {
-        throw new BadRequestException(
-          'deposit_amount_cents es requerido cuando deposit_mode no es "none"',
-        );
-      }
+  /** Al menos una opción de pago habilitada; si hay seña, requiere monto. */
+  private assertPaymentOptions(f: PaymentFlags): void {
+    if (!f.allowDeposit && !f.allowFullPayment && !f.allowNoPayment) {
+      throw new BadRequestException(
+        'El servicio debe permitir al menos una opción de pago (seña, pago completo o sin pago)',
+      );
+    }
+    if (f.allowDeposit && (f.depositAmountCents == null || f.depositAmountCents <= 0)) {
+      throw new BadRequestException('deposit_amount_cents es requerido cuando se permite seña');
     }
   }
 
@@ -48,14 +53,23 @@ export class CatalogService {
   }
 
   create(tenantId: string, dto: CreateServiceDto): Promise<Service> {
-    this.assertDepositConsistency(dto.depositMode, dto.depositAmountCents);
+    // Default: si no manda ninguna opción, queda "sin pago".
+    const allowDeposit = dto.allowDeposit ?? false;
+    const allowFullPayment = dto.allowFullPayment ?? false;
+    const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment);
+    const depositAmountCents = dto.depositAmountCents ?? null;
+
+    this.assertPaymentOptions({ allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents });
+
     const service = this.services.create({
       professionalId: tenantId,
       name: dto.name,
       durationMinutes: dto.durationMinutes,
       priceCents: dto.priceCents,
-      depositMode: dto.depositMode ?? DepositMode.None,
-      depositAmountCents: dto.depositAmountCents ?? null,
+      allowDeposit,
+      allowFullPayment,
+      allowNoPayment,
+      depositAmountCents,
       isActive: true,
     });
     return this.services.save(service);
@@ -63,9 +77,12 @@ export class CatalogService {
 
   async update(tenantId: string, id: string, dto: UpdateServiceDto): Promise<Service> {
     const service = await this.findById(tenantId, id);
-    const nextMode = dto.depositMode ?? service.depositMode;
-    const nextAmount = dto.depositAmountCents ?? service.depositAmountCents ?? undefined;
-    this.assertDepositConsistency(nextMode, nextAmount);
+    this.assertPaymentOptions({
+      allowDeposit: dto.allowDeposit ?? service.allowDeposit,
+      allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
+      allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
+      depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
+    });
     Object.assign(service, dto);
     return this.services.save(service);
   }

@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
-import { DepositMode } from '@/common/enums';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateServiceDto {
   @ApiProperty({ example: 'Corte de pelo' })
@@ -13,17 +12,28 @@ export class CreateServiceDto {
   @Min(1)
   durationMinutes!: number;
 
-  @ApiProperty({ example: 500000, description: 'precio en centavos' })
+  @ApiProperty({ example: 500000, description: 'precio (pago completo) en centavos' })
   @IsInt()
   @Min(0)
   priceCents!: number;
 
-  @ApiPropertyOptional({ enum: DepositMode })
+  // ---- Opciones de pago (checkboxes; se pueden combinar) ----
+  @ApiPropertyOptional({ type: Boolean, description: 'Permitir reservar con seña' })
   @IsOptional()
-  @IsEnum(DepositMode)
-  depositMode?: DepositMode;
+  @IsBoolean()
+  allowDeposit?: boolean;
 
-  @ApiPropertyOptional({ example: 200000, description: 'sena en centavos' })
+  @ApiPropertyOptional({ type: Boolean, description: 'Permitir reservar con pago completo' })
+  @IsOptional()
+  @IsBoolean()
+  allowFullPayment?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean, description: 'Permitir reservar sin pagar' })
+  @IsOptional()
+  @IsBoolean()
+  allowNoPayment?: boolean;
+
+  @ApiPropertyOptional({ example: 200000, description: 'monto de la seña en centavos' })
   @IsOptional()
   @IsInt()
   @Min(0)

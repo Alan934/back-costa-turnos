@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsEnum, IsISO8601, IsOptional, IsString, IsNotEmpty } from 'class-validator';
-import { CancellationReason, PaymentMethod } from '@/common/enums';
+import { CancellationReason, PaymentMethod, PaymentOption } from '@/common/enums';
 
 /** Datos del cliente: o un personId existente, o info para find-or-create. */
 export class ClientRefDto {
@@ -45,6 +45,17 @@ export class BookWithDepositDto extends BookAppointmentDto {
   @ApiProperty({ enum: PaymentMethod, example: PaymentMethod.MercadoPago })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
+
+  /** Qué paga: seña o el total. Default: deposit (seña). */
+  @ApiPropertyOptional({
+    enum: PaymentOption,
+    enumName: 'PaymentOption',
+    default: PaymentOption.Deposit,
+    description: 'deposit = seña, full = pago completo',
+  })
+  @IsOptional()
+  @IsEnum(PaymentOption)
+  paymentOption?: PaymentOption;
 }
 
 export class ConfirmDepositDto {

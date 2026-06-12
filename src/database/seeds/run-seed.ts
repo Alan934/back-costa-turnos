@@ -10,12 +10,7 @@ import { Service } from '@/modules/catalog/entities/service.entity';
 import { ScheduleRule } from '@/modules/availability/entities/schedule-rule.entity';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
-import {
-  DepositMode,
-  ProfessionalClientStatus,
-  ScheduleRuleKind,
-  SubscriptionStatus,
-} from '@/common/enums';
+import { ProfessionalClientStatus, ScheduleRuleKind, SubscriptionStatus } from '@/common/enums';
 
 /**
  * Seed de desarrollo: un platform admin + un professional demo con staff,
@@ -67,7 +62,6 @@ async function seed(): Promise<void> {
         businessName: 'Peluqueria Mi Pueblo',
         slug: 'mi-peluqueria',
         timezone: 'America/Argentina/Buenos_Aires',
-        defaultDepositMode: DepositMode.Hybrid,
         cancellationWindowHours: 24,
       }),
     );
@@ -160,24 +154,30 @@ async function seed(): Promise<void> {
   });
   if (serviceCount === 0) {
     await manager.save([
+      // Corte: permite las 3 opciones (con seña, pago completo y sin pago).
       manager.create(Service, {
         professionalId: professional.id,
         name: 'Corte de pelo',
         durationMinutes: 30,
         priceCents: 500_000,
-        depositMode: DepositMode.Hybrid,
+        allowDeposit: true,
+        allowFullPayment: true,
+        allowNoPayment: true,
         depositAmountCents: 200_000,
       }),
+      // Color: exige pago (seña o total), no permite reservar sin pagar.
       manager.create(Service, {
         professionalId: professional.id,
         name: 'Color',
         durationMinutes: 90,
         priceCents: 1_500_000,
-        depositMode: DepositMode.Required,
+        allowDeposit: true,
+        allowFullPayment: true,
+        allowNoPayment: false,
         depositAmountCents: 500_000,
       }),
     ]);
-    console.log('Servicios creados: Corte (hibrido), Color (required)');
+    console.log('Servicios creados: Corte (todas las opciones), Color (con pago)');
   }
 
   // Horarios: lunes a viernes 9-18 con break 13-14
