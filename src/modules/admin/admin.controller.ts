@@ -14,6 +14,9 @@ import { EnrichedClientDto } from '@/modules/clients/dto/enriched-client.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
+import { CreateComercialDto } from '@/modules/comercios/dto/comercio.dto';
 import { AdminMetricsService } from './admin-metrics.service';
 import { AdminMetricsDto } from './dto/admin-metrics.dto';
 import { AdminCreateClientDto, AdminCreateProfessionalDto } from './dto/admin-manage.dto';
@@ -33,11 +36,25 @@ export class AdminController {
     private readonly auth: AuthService,
     private readonly professionalsService: ProfessionalsService,
     private readonly clients: ClientsService,
+    private readonly comercios: ComerciosService,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Subscription)
     private readonly subs: Repository<Subscription>,
   ) {}
+
+  // ---- Comercios (solo admin crea cuentas comerciales) ----
+  @ApiOperation({
+    summary: 'Crear una cuenta comercial + su comercio',
+    description: 'Crea el account (email+password) con rol comercial y su comercio asociado.',
+  })
+  @ApiResponse({ status: 201, type: Comercio })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 409, description: 'Email ya reclamado o slug en uso' })
+  @Post('comercios')
+  createComercial(@Body() dto: CreateComercialDto): Promise<Comercio> {
+    return this.comercios.createComercialWithComercio(dto);
+  }
 
   @ApiOperation({ summary: 'Metricas de la plataforma (agregado de todos los tenants)' })
   @ApiResponse({ status: 200, type: AdminMetricsDto })

@@ -10,7 +10,14 @@ import { Service } from '@/modules/catalog/entities/service.entity';
 import { ScheduleRule } from '@/modules/availability/entities/schedule-rule.entity';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
-import { ProfessionalClientStatus, ScheduleRuleKind, SubscriptionStatus } from '@/common/enums';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
+import {
+  MembershipStatus,
+  ProfessionalClientStatus,
+  ScheduleRuleKind,
+  SubscriptionStatus,
+} from '@/common/enums';
 
 /**
  * Seed de desarrollo: un platform admin + un professional demo con staff,
@@ -204,6 +211,67 @@ async function seed(): Promise<void> {
     }
     await manager.save(rules);
     console.log(`Horarios creados (L-V 09-18, break 13-14). Hoy: ${DateTime.now().toISODate()}`);
+  }
+
+  // ---- Comercios y membresías ----
+  // Comercio-de-uno del profesional demo (su lugar propio).
+  let personalComercio = await manager.findOne(Comercio, { where: { slug: professional.slug } });
+  if (!personalComercio) {
+    personalComercio = await manager.save(
+      manager.create(Comercio, {
+        accountId: proAccount.id,
+        name: professional.businessName,
+        slug: professional.slug,
+        address: professional.address ?? null,
+        timezone: professional.timezone,
+        isPersonal: true,
+      }),
+    );
+    await manager.save(
+      manager.create(Membership, {
+        professionalId: professional.id,
+        comercioId: personalComercio.id,
+        status: MembershipStatus.Active,
+      }),
+    );
+    console.log('Comercio-de-uno del profesional demo + membresía creados');
+  }
+
+  // Comercio "Peluquería Centro" con un comercial; el profesional demo es miembro
+  // (muestra que un profesional puede trabajar en varios comercios).
+  const comercialEmail = 'comercial@centro.com';
+  let comercialAccount = await manager.findOne(Account, { where: { email: comercialEmail } });
+  if (!comercialAccount) {
+    comercialAccount = await manager.save(
+      manager.create(Account, {
+        email: comercialEmail,
+        passwordHash: await argon2.hash('comercial12345'),
+        isClaimed: true,
+        emailVerifiedAt: new Date(),
+      }),
+    );
+  }
+  let centro = await manager.findOne(Comercio, { where: { slug: 'centro' } });
+  if (!centro) {
+    centro = await manager.save(
+      manager.create(Comercio, {
+        accountId: comercialAccount.id,
+        name: 'Peluquería Centro',
+        slug: 'centro',
+        address: 'San Martín 100, Mendoza',
+        timezone: 'America/Argentina/Buenos_Aires',
+        isPersonal: false,
+      }),
+    );
+    await manager.save(
+      manager.create(Membership, {
+        professionalId: professional.id,
+        comercioId: centro.id,
+        status: MembershipStatus.Active,
+      }),
+    );
+    console.log(`Comercial creado: ${comercialEmail} / comercial12345 (comercio: Peluquería Centro)`);
+    console.log('El profesional demo también es miembro de Peluquería Centro');
   }
 
   await dataSource.destroy();

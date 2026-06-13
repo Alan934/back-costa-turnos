@@ -2,6 +2,9 @@ import { Account } from '@/modules/identity/entities/account.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { ComercioInvitation } from '@/modules/comercios/entities/comercio-invitation.entity';
 import { VerificationToken } from '@/modules/auth/entities/verification-token.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { FichaField } from '@/modules/clients/entities/ficha-field.entity';
@@ -29,6 +32,9 @@ export const entities = [
   Person,
   Professional,
   Staff,
+  Comercio,
+  Membership,
+  ComercioInvitation,
   VerificationToken,
   ProfessionalClient,
   FichaField,

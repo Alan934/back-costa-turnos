@@ -12,6 +12,8 @@ import { PersonsService } from '@/modules/identity/persons.service';
 import { Account } from '@/modules/identity/entities/account.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
+import { ProfessionalsService } from '@/modules/professionals/professionals.service';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { AccountStatus, AppRole, VerificationPurpose } from '@/common/enums';
 import { JwtPayload } from '@/common/types/request-user';
 import { MailerService } from '@/modules/mailer/mailer.service';
@@ -21,6 +23,7 @@ import {
   ClaimAccountDto,
   LoginDto,
   RegisterDto,
+  RegisterProfessionalDto,
   ResetPasswordDto,
   VerifyEmailDto,
 } from './dto/auth.dto';
@@ -39,6 +42,8 @@ export class AuthService {
     private readonly tokens: TokensService,
     private readonly verification: VerificationTokenService,
     private readonly mailer: MailerService,
+    private readonly professionalsService: ProfessionalsService,
+    private readonly comercios: ComerciosService,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Staff)
@@ -68,6 +73,14 @@ export class AuthService {
       professionalId ??= staffMember.professionalId;
     }
 
+    // Comercios que administra (comercial). El comercio-de-uno (isPersonal) no
+    // otorga el rol comercial, pero sí se incluye en comercioIds.
+    const ownedComercios = await this.comercios.getOwnedComercios(account.id);
+    const comercioIds = ownedComercios.map((c) => c.id);
+    if (ownedComercios.some((c) => !c.isPersonal)) {
+      roles.push(AppRole.Comercial);
+    }
+
     return {
       sub: account.id,
       email: account.email,
@@ -76,6 +89,7 @@ export class AuthService {
       isPlatformAdmin: account.isPlatformAdmin,
       professionalId,
       staffId,
+      comercioIds,
     };
   }
 
@@ -126,6 +140,46 @@ export class AuthService {
       fullName: dto.fullName,
       email: dto.email,
       accountId: account.id,
+    });
+
+    return this.issueAndPersist(account);
+  }
+
+  /**
+   * Registro de PROFESIONAL (trabajador): crea la cuenta + persona y onboardea
+   * (professional + comercio-de-uno + membresía + suscripción trial).
+   * El token resultante ya trae rol professional y su comercio personal.
+   */
+  async registerProfessional(dto: RegisterProfessionalDto): Promise<IssuedTokens> {
+    const existing = await this.accounts.findByEmail(dto.email);
+    if (existing && existing.isClaimed) {
+      throw new BadRequestException('Ya existe una cuenta con ese email');
+    }
+    const passwordHash = await argon2.hash(dto.password);
+    let account: Account;
+    if (existing) {
+      existing.passwordHash = passwordHash;
+      existing.isClaimed = true;
+      account = await this.accounts.save(existing);
+    } else {
+      account = await this.accounts.create({
+        email: dto.email,
+        passwordHash,
+        isClaimed: true,
+      });
+    }
+
+    await this.persons.findOrCreate({
+      fullName: dto.fullName,
+      email: dto.email,
+      accountId: account.id,
+    });
+
+    await this.professionalsService.onboard(account.id, {
+      businessName: dto.businessName,
+      slug: dto.slug,
+      timezone: dto.timezone,
+      address: dto.address,
     });
 
     return this.issueAndPersist(account);

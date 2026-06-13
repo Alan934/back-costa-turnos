@@ -7,9 +7,28 @@
 /** Roles de autorizacion (no es una columna; deriva de account + memberships). */
 export enum AppRole {
   PlatformAdmin = 'platform_admin',
+  /** Persona-trabajador que ofrece servicios (dueño de sus clientes y suscripcion). */
   Professional = 'professional',
+  /** Dueño/gestor de un comercio (equipo). Lo crea el admin. */
+  Comercial = 'comercial',
   Staff = 'staff',
   Client = 'client',
+}
+
+/** Estado de la membresia de un profesional en un comercio. */
+export enum MembershipStatus {
+  /** Invitado, aun no aceptó. */
+  Invited = 'invited',
+  Active = 'active',
+  Inactive = 'inactive',
+}
+
+/** Estado de una invitacion de un comercio a un profesional. */
+export enum InvitationStatus {
+  Pending = 'pending',
+  Accepted = 'accepted',
+  Expired = 'expired',
+  Cancelled = 'cancelled',
 }
 
 export enum AccountStatus {

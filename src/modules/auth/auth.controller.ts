@@ -27,6 +27,7 @@ import {
   LoginDto,
   RefreshDto,
   RegisterDto,
+  RegisterProfessionalDto,
   RequestCodeDto,
   ResetPasswordDto,
   VerifyEmailDto,
@@ -40,13 +41,25 @@ export class AuthController {
     private readonly config: ConfigService,
   ) {}
 
-  @ApiOperation({ summary: 'Registrar una nueva cuenta' })
+  @ApiOperation({ summary: 'Registrar una nueva cuenta (cliente)' })
   @ApiResponse({ status: 201, type: AuthTokensDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
+  }
+
+  @ApiOperation({
+    summary: 'Registrarse como profesional',
+    description: 'Crea la cuenta + el profesional con su comercio-de-uno y suscripción trial.',
+  })
+  @ApiResponse({ status: 201, type: AuthTokensDto })
+  @ApiResponse({ status: 400, description: 'Datos invalidos o slug en uso' })
+  @Public()
+  @Post('register-professional')
+  registerProfessional(@Body() dto: RegisterProfessionalDto) {
+    return this.auth.registerProfessional(dto);
   }
 
   @ApiOperation({ summary: 'Iniciar sesion' })

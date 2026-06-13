@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  MinLength,
+} from 'class-validator';
 import { AppRole } from '@/common/enums';
 
 export class RegisterDto {
@@ -16,6 +24,31 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   fullName!: string;
+}
+
+/** Registro de profesional (trabajador): cuenta + onboarding. */
+export class RegisterProfessionalDto extends RegisterDto {
+  @ApiProperty({ example: 'Juan Perez Estilista', description: 'nombre visible del profesional' })
+  @IsString()
+  @IsNotEmpty()
+  businessName!: string;
+
+  @ApiProperty({ example: 'juan-estilista', description: 'slug único para su página propia' })
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug debe ser kebab-case (a-z, 0-9, guiones)',
+  })
+  slug!: string;
+
+  @ApiPropertyOptional({ example: 'America/Argentina/Buenos_Aires' })
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+
+  @ApiPropertyOptional({ example: 'Belgrano 245, Costa de Araujo, Mendoza' })
+  @IsOptional()
+  @IsString()
+  address?: string;
 }
 
 export class LoginDto {
@@ -114,9 +147,16 @@ export class AuthMeDto {
   @ApiProperty({ type: Boolean })
   isPlatformAdmin!: boolean;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'tenant que administra' })
+  @ApiPropertyOptional({ format: 'uuid', description: 'professional (trabajador)' })
   professionalId?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   staffId?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    isArray: true,
+    description: 'comercios que administra como comercial (+ su comercio-de-uno)',
+  })
+  comercioIds?: string[];
 }

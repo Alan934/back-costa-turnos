@@ -1,0 +1,42 @@
+import { Column, Entity, Index, JoinColumn, ManyToOne, Unique } from 'typeorm';
+import { ApiProperty } from '@nestjs/swagger';
+import { BaseEntity } from '@/common/base.entity';
+import { MembershipStatus } from '@/common/enums';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Comercio } from './comercio.entity';
+
+/**
+ * Membresia: un profesional (trabajador) trabajando en un comercio. Es el
+ * "worker-in-comercio". En fases siguientes, sus servicios/horarios/precios
+ * cuelgan de aca (membership_id).
+ */
+@Entity('membership')
+@Unique('uq_membership_pro_comercio', ['professionalId', 'comercioId'])
+@Index('idx_membership_comercio', ['comercioId'])
+@Index('idx_membership_professional', ['professionalId'])
+export class Membership extends BaseEntity {
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'professional_id', type: 'uuid' })
+  professionalId!: string;
+
+  @ManyToOne(() => Professional, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'professional_id' })
+  professional?: Professional;
+
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'comercio_id', type: 'uuid' })
+  comercioId!: string;
+
+  @ManyToOne(() => Comercio, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'comercio_id' })
+  comercio?: Comercio;
+
+  @ApiProperty({ enum: MembershipStatus, enumName: 'MembershipStatus' })
+  @Column({
+    type: 'enum',
+    enum: MembershipStatus,
+    enumName: 'membership_status',
+    default: MembershipStatus.Active,
+  })
+  status!: MembershipStatus;
+}

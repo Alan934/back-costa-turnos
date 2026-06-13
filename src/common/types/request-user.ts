@@ -10,9 +10,11 @@ export interface JwtPayload {
   emailVerified: boolean;
   roles: AppRole[];
   isPlatformAdmin: boolean;
-  /** tenant que administra (professional/staff). */
+  /** professional (trabajador) dueño de clientes/suscripción. */
   professionalId?: string;
   staffId?: string;
+  /** comercios que ADMINISTRA como comercial (es dueño). */
+  comercioIds?: string[];
 }
 
 /** Usuario autenticado adjuntado a la request por la estrategia JWT. */
@@ -20,6 +22,10 @@ export type RequestUser = JwtPayload;
 
 export interface AuthenticatedRequest extends Request {
   user?: RequestUser;
-  /** tenant resuelto por el TenantGuard (token o slug publico). */
+  /** tenant (worker) resuelto por el TenantGuard. */
   tenantId?: string;
+  /** comercio resuelto por ComercioMembershipGuard/ComercioOwnerGuard. */
+  comercioId?: string;
+  /** membresía del worker en el comercio (ComercioMembershipGuard). */
+  membershipId?: string;
 }

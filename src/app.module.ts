@@ -16,6 +16,7 @@ import { HttpThrottlerGuard } from './common/guards/http-throttler.guard';
 
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
+import { ComerciosModule } from './modules/comercios/comercios.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ProfessionalsModule } from './modules/professionals/professionals.module';
 import { ClientsModule } from './modules/clients/clients.module';
@@ -89,6 +90,7 @@ import { MeModule } from './modules/me/me.module';
 
     HealthModule,
     IdentityModule,
+    ComerciosModule,
     AuthModule,
     ProfessionalsModule,
     ClientsModule,

@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IdentityModule } from '@/modules/identity/identity.module';
 import { MailerModule } from '@/modules/mailer/mailer.module';
+import { ProfessionalsModule } from '@/modules/professionals/professionals.module';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { VerificationToken } from './entities/verification-token.entity';
@@ -18,6 +19,7 @@ import { AuthController } from './auth.controller';
   imports: [
     IdentityModule,
     MailerModule,
+    ProfessionalsModule,
     PassportModule,
     JwtModule.register({}),
     TypeOrmModule.forFeature([VerificationToken, Professional, Staff]),

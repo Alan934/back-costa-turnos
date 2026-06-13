@@ -53,6 +53,30 @@ export class MailerService {
     this.logger.log(`[EMAIL] codigo ${purpose} enviado a ${email}`);
   }
 
+  /** Envía la invitación de un comercio a un profesional (con link al front). */
+  async sendComercioInvitation(email: string, comercioName: string, token: string): Promise<void> {
+    const link = `${this.frontUrl}/comercios/invitacion?token=${encodeURIComponent(token)}`;
+    const subject = `${comercioName} te invitó a su equipo en ${BRAND}`;
+    const text =
+      `${comercioName} te invitó a unirte a su equipo en ${BRAND}.\n` +
+      `Aceptá la invitación acá:\n${link}\n\n` +
+      `(El enlace vence en unos días.)`;
+    const html = this.htmlTemplate({
+      title: 'Te invitaron a un equipo',
+      intro: `${comercioName} te invitó a unirte a su equipo en ${BRAND}. Si aceptás, vas a poder cargar tus servicios, horarios y precios en ese comercio.`,
+      cta: 'Aceptar invitación',
+      link,
+      code: null,
+    });
+
+    if (!this.transporter) {
+      this.logger.warn(`[MAIL stub] invitacion comercio para ${email}: ${link}`);
+      return;
+    }
+    await this.transporter.sendMail({ from: this.from, to: email, subject, text, html });
+    this.logger.log(`[EMAIL] invitacion de comercio enviada a ${email}`);
+  }
+
   private renderCode(
     purpose: VerificationPurpose,
     code: string,
@@ -114,18 +138,23 @@ export class MailerService {
     }
   }
 
-  /** Plantilla HTML simple con botón (si hay link) + código visible. */
+  /** Plantilla HTML simple con botón (si hay link) + código visible (si hay). */
   private htmlTemplate(opts: {
     title: string;
     intro: string;
     cta: string | null;
     link: string | null;
-    code: string;
+    code: string | null;
   }): string {
     const button =
       opts.link && opts.cta
         ? `<p style="margin:0 0 20px"><a href="${opts.link}" style="display:inline-block;background:#2a2724;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">${opts.cta}</a></p>`
         : '';
+    const codeBlock = opts.code
+      ? `<p style="color:#444;margin:0 0 4px">Tu código:</p>` +
+        `<p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:0 0 8px;color:#111">${opts.code}</p>` +
+        `<p style="font-size:13px;color:#888;margin:0">El código vence en pocos minutos.</p>`
+      : '';
     const fallback = opts.link
       ? `<p style="font-size:12px;color:#888;word-break:break-all;margin:8px 0 0">O copiá este enlace:<br><a href="${opts.link}" style="color:#888">${opts.link}</a></p>`
       : '';
@@ -135,9 +164,7 @@ export class MailerService {
       `<h1 style="font-size:20px;margin:0 0 12px;color:#111">${opts.title}</h1>` +
       `<p style="color:#444;margin:0 0 20px">${opts.intro}</p>` +
       button +
-      `<p style="color:#444;margin:0 0 4px">Tu código:</p>` +
-      `<p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:0 0 8px;color:#111">${opts.code}</p>` +
-      `<p style="font-size:13px;color:#888;margin:0">El código vence en pocos minutos.</p>` +
+      codeBlock +
       fallback +
       `<hr style="border:none;border-top:1px solid #eee;margin:24px 0">` +
       `<p style="font-size:12px;color:#aaa;margin:0">${BRAND}</p>` +

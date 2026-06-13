@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfig, SubscriptionConfig } from '@/config/configuration';
 import { SubscriptionStatus } from '@/common/enums';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Professional } from './entities/professional.entity';
 import { Staff } from './entities/staff.entity';
 import {
@@ -28,6 +29,7 @@ export class ProfessionalsService {
     private readonly staff: Repository<Staff>,
     @InjectRepository(Subscription)
     private readonly subscriptions: Repository<Subscription>,
+    private readonly comercios: ComerciosService,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
   ) {}
@@ -65,6 +67,9 @@ export class ProfessionalsService {
           isActive: true,
         }),
       );
+
+      // Comercio-de-uno (lugar propio) + membresía activa para trabajar solo.
+      await this.comercios.ensurePersonalComercio(professional, manager);
 
       const subCfg = this.config.getOrThrow<SubscriptionConfig>('subscription');
       const now = new Date();
