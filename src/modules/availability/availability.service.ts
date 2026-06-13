@@ -3,11 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 import { DateTime, Interval } from 'luxon';
 import { AppointmentStatus, ScheduleRuleKind } from '@/common/enums';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { ScheduleRule } from './entities/schedule-rule.entity';
+import { ScheduleRuleService } from './entities/schedule-rule-service.entity';
 import { TimeOff } from './entities/time-off.entity';
 import { AvailableSlot, CreateScheduleRuleDto, CreateTimeOffDto } from './dto/availability.dto';
 
@@ -24,6 +26,8 @@ export class AvailabilityService {
   constructor(
     @InjectRepository(ScheduleRule)
     private readonly scheduleRules: Repository<ScheduleRule>,
+    @InjectRepository(ScheduleRuleService)
+    private readonly scheduleRuleServices: Repository<ScheduleRuleService>,
     @InjectRepository(TimeOff)
     private readonly timeOffs: Repository<TimeOff>,
     @InjectRepository(Staff)
@@ -34,100 +38,148 @@ export class AvailabilityService {
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
+    private readonly comercios: ComerciosService,
   ) {}
 
-  private async assertStaffInTenant(tenantId: string, staffId: string): Promise<Staff> {
-    const staff = await this.staff.findOne({
-      where: { id: staffId, professionalId: tenantId },
+  // ---- Helpers de mapeo regla<->servicio ----
+
+  /** Mapa scheduleRuleId -> serviceIds para un conjunto de reglas. */
+  private async serviceIdsByRule(ruleIds: string[]): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    if (ruleIds.length === 0) return map;
+    const rows = await this.scheduleRuleServices.find({
+      where: { scheduleRuleId: In(ruleIds) },
     });
-    if (!staff) throw new NotFoundException('Staff no encontrado');
-    return staff;
+    for (const row of rows) {
+      const list = map.get(row.scheduleRuleId) ?? [];
+      list.push(row.serviceId);
+      map.set(row.scheduleRuleId, list);
+    }
+    return map;
   }
 
-  // ---- Schedule rules ----
-  listScheduleRules(tenantId: string, staffId: string): Promise<ScheduleRule[]> {
-    return this.assertStaffInTenant(tenantId, staffId).then(() =>
-      this.scheduleRules.find({
-        where: { staffId },
-        order: { dayOfWeek: 'ASC', startTime: 'ASC' },
+  private async withServiceIds(rules: ScheduleRule[]): Promise<ScheduleRule[]> {
+    const byRule = await this.serviceIdsByRule(rules.map((r) => r.id));
+    return rules.map((r) =>
+      Object.assign(r, { serviceIds: byRule.get(r.id) ?? [] }),
+    );
+  }
+
+  // ---- Schedule rules POR MEMBRESÍA ----
+
+  async listScheduleRulesByMembership(membershipId: string): Promise<ScheduleRule[]> {
+    const rules = await this.scheduleRules.find({
+      where: { membershipId },
+      order: { dayOfWeek: 'ASC', startTime: 'ASC' },
+    });
+    return this.withServiceIds(rules);
+  }
+
+  async createScheduleRuleForMembership(
+    membershipId: string,
+    dto: CreateScheduleRuleDto,
+  ): Promise<ScheduleRule> {
+    if (dto.startTime >= dto.endTime) {
+      throw new BadRequestException('start_time debe ser anterior a end_time');
+    }
+    const membership = await this.comercios.getMembershipById(membershipId);
+    // staff_id legacy: el sillón del comercio-de-uno / del profesional.
+    const staff = await this.staff.findOne({ where: { professionalId: membership.professionalId } });
+    if (!staff) throw new NotFoundException('Staff del profesional no encontrado');
+
+    const serviceIds = await this.validateRuleServices(membershipId, dto.serviceIds);
+
+    const rule = await this.scheduleRules.save(
+      this.scheduleRules.create({
+        membershipId,
+        staffId: staff.id,
+        dayOfWeek: dto.dayOfWeek,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        kind: dto.kind ?? ScheduleRuleKind.Work,
+      }),
+    );
+    await this.saveRuleServices(rule.id, serviceIds);
+    return Object.assign(rule, { serviceIds });
+  }
+
+  async deleteScheduleRuleByMembership(membershipId: string, id: string): Promise<void> {
+    const res = await this.scheduleRules.delete({ id, membershipId });
+    if (!res.affected) throw new NotFoundException('Regla no encontrada');
+  }
+
+  /** Valida que los serviceIds pertenezcan a la membresía y devuelve la lista (o []). */
+  private async validateRuleServices(
+    membershipId: string,
+    serviceIds?: string[],
+  ): Promise<string[]> {
+    if (!serviceIds || serviceIds.length === 0) return [];
+    const unique = [...new Set(serviceIds)];
+    const found = await this.services.find({
+      where: { id: In(unique), membershipId },
+    });
+    if (found.length !== unique.length) {
+      throw new BadRequestException('Algún servicio no pertenece a esta membresía');
+    }
+    return unique;
+  }
+
+  private async saveRuleServices(scheduleRuleId: string, serviceIds: string[]): Promise<void> {
+    if (serviceIds.length === 0) return;
+    await this.scheduleRuleServices.save(
+      serviceIds.map((serviceId) =>
+        this.scheduleRuleServices.create({ scheduleRuleId, serviceId }),
+      ),
+    );
+  }
+
+  // ---- Time off POR MEMBRESÍA ----
+
+  async createTimeOffForMembership(membershipId: string, dto: CreateTimeOffDto): Promise<TimeOff> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    const staff = await this.staff.findOne({ where: { professionalId: membership.professionalId } });
+    if (!staff) throw new NotFoundException('Staff del profesional no encontrado');
+    const start = new Date(dto.startAt);
+    const end = new Date(dto.endAt);
+    if (start >= end) throw new BadRequestException('start_at debe ser anterior a end_at');
+    return this.timeOffs.save(
+      this.timeOffs.create({
+        membershipId,
+        staffId: staff.id,
+        startAt: start,
+        endAt: end,
+        reason: dto.reason ?? null,
       }),
     );
   }
 
-  async createScheduleRule(
-    tenantId: string,
-    staffId: string,
-    dto: CreateScheduleRuleDto,
-  ): Promise<ScheduleRule> {
-    await this.assertStaffInTenant(tenantId, staffId);
-    if (dto.startTime >= dto.endTime) {
-      throw new BadRequestException('start_time debe ser anterior a end_time');
-    }
-    const rule = this.scheduleRules.create({
-      staffId,
-      dayOfWeek: dto.dayOfWeek,
-      startTime: dto.startTime,
-      endTime: dto.endTime,
-      kind: dto.kind ?? ScheduleRuleKind.Work,
-    });
-    return this.scheduleRules.save(rule);
+  listTimeOffByMembership(membershipId: string): Promise<TimeOff[]> {
+    return this.timeOffs.find({ where: { membershipId }, order: { startAt: 'ASC' } });
   }
 
-  async deleteScheduleRule(tenantId: string, staffId: string, id: string): Promise<void> {
-    await this.assertStaffInTenant(tenantId, staffId);
-    const res = await this.scheduleRules.delete({ id, staffId });
-    if (!res.affected) throw new NotFoundException('Regla no encontrada');
-  }
-
-  // ---- Time off ----
-  async createTimeOff(tenantId: string, staffId: string, dto: CreateTimeOffDto): Promise<TimeOff> {
-    await this.assertStaffInTenant(tenantId, staffId);
-    const start = new Date(dto.startAt);
-    const end = new Date(dto.endAt);
-    if (start >= end) throw new BadRequestException('start_at debe ser anterior a end_at');
-    const timeOff = this.timeOffs.create({
-      staffId,
-      startAt: start,
-      endAt: end,
-      reason: dto.reason ?? null,
-    });
-    return this.timeOffs.save(timeOff);
-  }
-
-  listTimeOff(tenantId: string, staffId: string): Promise<TimeOff[]> {
-    return this.assertStaffInTenant(tenantId, staffId).then(() =>
-      this.timeOffs.find({ where: { staffId }, order: { startAt: 'ASC' } }),
-    );
-  }
-
-  async deleteTimeOff(tenantId: string, staffId: string, id: string): Promise<void> {
-    await this.assertStaffInTenant(tenantId, staffId);
-    const res = await this.timeOffs.delete({ id, staffId });
+  async deleteTimeOffByMembership(membershipId: string, id: string): Promise<void> {
+    const res = await this.timeOffs.delete({ id, membershipId });
     if (!res.affected) throw new NotFoundException('Bloqueo no encontrado');
   }
 
   /**
-   * Calcula los slots libres de un staff para un servicio en un rango de fechas,
-   * respetando: horarios work - break, time_off, turnos ocupados, y la zona
-   * horaria del professional. Devuelve los inicios disponibles (en UTC ISO).
+   * Slots libres de una membresía (profesional-en-comercio) para un servicio.
+   * Respeta horarios work-break, time_off, turnos ocupados, zona horaria del
+   * comercio y el mapeo regla<->servicio (reglas que apliquen al servicio o a todos).
    */
-  async computeSlots(
-    tenantId: string,
-    staffId: string,
+  async computeSlotsByMembership(
+    membershipId: string,
     serviceId: string,
     from: string,
     to: string,
   ): Promise<AvailableSlot[]> {
-    await this.assertStaffInTenant(tenantId, staffId);
-    const professional = await this.professionals.findOneOrFail({
-      where: { id: tenantId },
-    });
-    const service = await this.services.findOne({
-      where: { id: serviceId, professionalId: tenantId },
-    });
+    const membership = await this.comercios.getMembershipById(membershipId);
+    const comercio = await this.comercios.getComercio(membership.comercioId);
+
+    const service = await this.services.findOne({ where: { id: serviceId, membershipId } });
     if (!service) throw new NotFoundException('Servicio no encontrado');
 
-    const zone = professional.timezone;
+    const zone = comercio.timezone;
     const duration = service.durationMinutes;
     const rangeStart = DateTime.fromISO(from, { zone }).startOf('day');
     const rangeEnd = DateTime.fromISO(to, { zone }).endOf('day');
@@ -135,28 +187,63 @@ export class AvailabilityService {
       throw new BadRequestException('Rango de fechas invalido');
     }
 
-    const rules = await this.scheduleRules.find({ where: { staffId } });
+    const rules = await this.scheduleRules.find({ where: { membershipId } });
+    // Reglas de trabajo que aplican a este servicio (mapeo vacío = todas).
+    const ruleServiceMap = await this.serviceIdsByRule(
+      rules.filter((r) => r.kind === ScheduleRuleKind.Work).map((r) => r.id),
+    );
+
     const workByDay = new Map<number, ScheduleRule[]>();
     const breaksByDay = new Map<number, ScheduleRule[]>();
     for (const rule of rules) {
-      const map = rule.kind === ScheduleRuleKind.Work ? workByDay : breaksByDay;
-      const list = map.get(rule.dayOfWeek) ?? [];
-      list.push(rule);
-      map.set(rule.dayOfWeek, list);
+      if (rule.kind === ScheduleRuleKind.Work) {
+        const mapped = ruleServiceMap.get(rule.id);
+        // Si la regla está mapeada a servicios específicos y este no está, se ignora.
+        if (mapped && mapped.length > 0 && !mapped.includes(serviceId)) continue;
+        const list = workByDay.get(rule.dayOfWeek) ?? [];
+        list.push(rule);
+        workByDay.set(rule.dayOfWeek, list);
+      } else {
+        const list = breaksByDay.get(rule.dayOfWeek) ?? [];
+        list.push(rule);
+        breaksByDay.set(rule.dayOfWeek, list);
+      }
     }
 
     const utcStart = rangeStart.toUTC().toJSDate();
     const utcEnd = rangeEnd.toUTC().toJSDate();
 
-    const timeOffs = await this.timeOffs.find({ where: { staffId } });
+    const timeOffs = await this.timeOffs.find({ where: { membershipId } });
     const busy = await this.appointments.find({
       where: {
-        staffId,
+        membershipId,
         status: In(BLOCKING_STATUSES),
         startAt: Between(utcStart, utcEnd),
       },
     });
 
+    return this.buildSlots({
+      rangeStart,
+      rangeEnd,
+      duration,
+      workByDay,
+      breaksByDay,
+      timeOffs,
+      busy,
+    });
+  }
+
+  // ---- Núcleo de cálculo de slots (compartido) ----
+  private buildSlots(args: {
+    rangeStart: DateTime;
+    rangeEnd: DateTime;
+    duration: number;
+    workByDay: Map<number, ScheduleRule[]>;
+    breaksByDay: Map<number, ScheduleRule[]>;
+    timeOffs: TimeOff[];
+    busy: Appointment[];
+  }): AvailableSlot[] {
+    const { rangeStart, rangeEnd, duration, workByDay, breaksByDay, timeOffs, busy } = args;
     const occupied: Interval[] = [
       ...timeOffs.map((t) =>
         Interval.fromDateTimes(DateTime.fromJSDate(t.startAt), DateTime.fromJSDate(t.endAt)),
@@ -201,8 +288,8 @@ export class AvailabilityService {
 
           if (!overlapsBreak && !overlapsOccupied && !isPast) {
             slots.push({
-              startAt: slotStart.toUTC().toISO(),
-              endAt: slotEnd.toUTC().toISO(),
+              startAt: slotStart.toUTC().toISO()!,
+              endAt: slotEnd.toUTC().toISO()!,
             });
           }
           cursor = cursor.plus({ minutes: duration });
@@ -211,5 +298,69 @@ export class AvailabilityService {
     }
 
     return slots;
+  }
+
+  // ---- Compat por professional + staff (comercio-de-uno) ----
+
+  private async assertStaffInTenant(tenantId: string, staffId: string): Promise<Staff> {
+    const staff = await this.staff.findOne({
+      where: { id: staffId, professionalId: tenantId },
+    });
+    if (!staff) throw new NotFoundException('Staff no encontrado');
+    return staff;
+  }
+
+  private personalMembershipId(professionalId: string): Promise<string> {
+    return this.comercios.getPersonalMembership(professionalId).then((m) => m.id);
+  }
+
+  async listScheduleRules(tenantId: string, staffId: string): Promise<ScheduleRule[]> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.listScheduleRulesByMembership(await this.personalMembershipId(tenantId));
+  }
+
+  async createScheduleRule(
+    tenantId: string,
+    staffId: string,
+    dto: CreateScheduleRuleDto,
+  ): Promise<ScheduleRule> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.createScheduleRuleForMembership(await this.personalMembershipId(tenantId), dto);
+  }
+
+  async deleteScheduleRule(tenantId: string, staffId: string, id: string): Promise<void> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.deleteScheduleRuleByMembership(await this.personalMembershipId(tenantId), id);
+  }
+
+  async createTimeOff(tenantId: string, staffId: string, dto: CreateTimeOffDto): Promise<TimeOff> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.createTimeOffForMembership(await this.personalMembershipId(tenantId), dto);
+  }
+
+  async listTimeOff(tenantId: string, staffId: string): Promise<TimeOff[]> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.listTimeOffByMembership(await this.personalMembershipId(tenantId));
+  }
+
+  async deleteTimeOff(tenantId: string, staffId: string, id: string): Promise<void> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.deleteTimeOffByMembership(await this.personalMembershipId(tenantId), id);
+  }
+
+  async computeSlots(
+    tenantId: string,
+    staffId: string,
+    serviceId: string,
+    from: string,
+    to: string,
+  ): Promise<AvailableSlot[]> {
+    await this.assertStaffInTenant(tenantId, staffId);
+    return this.computeSlotsByMembership(
+      await this.personalMembershipId(tenantId),
+      serviceId,
+      from,
+      to,
+    );
   }
 }

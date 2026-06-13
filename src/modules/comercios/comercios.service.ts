@@ -40,6 +40,32 @@ export class ComerciosService {
     return comercio;
   }
 
+  /** Comercio por slug (página pública). 404 si no existe. */
+  async getComercioBySlug(slug: string): Promise<Comercio> {
+    const comercio = await this.comercios.findOne({ where: { slug } });
+    if (!comercio) throw new NotFoundException('Página no encontrada');
+    return comercio;
+  }
+
+  /** Roster público: membresías ACTIVAS del comercio con el profesional cargado. */
+  listActiveMembers(comercioId: string): Promise<Membership[]> {
+    return this.memberships.find({
+      where: { comercioId, status: MembershipStatus.Active },
+      relations: { professional: true },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /** Una membresía activa por id dentro de un comercio (valida pertenencia). 404 si no. */
+  async getActiveMembershipInComercio(comercioId: string, membershipId: string): Promise<Membership> {
+    const membership = await this.memberships.findOne({
+      where: { id: membershipId, comercioId, status: MembershipStatus.Active },
+      relations: { professional: true },
+    });
+    if (!membership) throw new NotFoundException('Profesional no disponible en este comercio');
+    return membership;
+  }
+
   async updateComercio(comercioId: string, dto: UpdateComercioDto): Promise<Comercio> {
     const comercio = await this.getComercio(comercioId);
     Object.assign(comercio, dto);
@@ -62,6 +88,15 @@ export class ComerciosService {
       relations: { comercio: true },
       order: { createdAt: 'ASC' },
     });
+  }
+
+  /** IDs de comercios donde el profesional tiene membresía activa. */
+  async listMembershipComercioIds(professionalId: string): Promise<string[]> {
+    const rows = await this.memberships.find({
+      where: { professionalId, status: MembershipStatus.Active },
+      select: { comercioId: true },
+    });
+    return rows.map((m) => m.comercioId);
   }
 
   /**
@@ -163,5 +198,36 @@ export class ComerciosService {
   /** professional (worker) de una cuenta, o null. */
   findProfessionalByAccount(accountId: string): Promise<Professional | null> {
     return this.professionals.findOne({ where: { accountId } });
+  }
+
+  /** Membresia activa de un profesional en un comercio (o lanza 404). */
+  async getActiveMembership(professionalId: string, comercioId: string): Promise<Membership> {
+    const membership = await this.memberships.findOne({
+      where: { professionalId, comercioId, status: MembershipStatus.Active },
+    });
+    if (!membership) throw new NotFoundException('Membresía no encontrada o inactiva');
+    return membership;
+  }
+
+  /**
+   * Membresia del comercio-de-uno (isPersonal) de un profesional. Es el scope por
+   * defecto cuando se opera "como profesional solo" sin elegir comercio explicito.
+   */
+  async getPersonalMembership(professionalId: string): Promise<Membership> {
+    const membership = await this.memberships
+      .createQueryBuilder('m')
+      .innerJoin('comercio', 'c', 'c.id = m.comercio_id')
+      .where('m.professional_id = :professionalId', { professionalId })
+      .andWhere('c.is_personal = true')
+      .getOne();
+    if (!membership) throw new NotFoundException('El profesional no tiene comercio propio');
+    return membership;
+  }
+
+  /** Devuelve la membresia por id (o lanza 404). */
+  async getMembershipById(membershipId: string): Promise<Membership> {
+    const membership = await this.memberships.findOne({ where: { id: membershipId } });
+    if (!membership) throw new NotFoundException('Membresía no encontrada');
+    return membership;
   }
 }

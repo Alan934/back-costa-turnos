@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Service } from './entities/service.entity';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
 
@@ -16,6 +17,7 @@ export class CatalogService {
   constructor(
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    private readonly comercios: ComerciosService,
   ) {}
 
   /** Al menos una opción de pago habilitada; si hay seña, requiere monto. */
@@ -30,30 +32,31 @@ export class CatalogService {
     }
   }
 
-  listActive(tenantId: string): Promise<Service[]> {
+  // ---- Por membresía (profesional-en-comercio): servicios/precios de ese comercio ----
+  listActiveByMembership(membershipId: string): Promise<Service[]> {
     return this.services.find({
-      where: { professionalId: tenantId, isActive: true },
+      where: { membershipId, isActive: true },
       order: { name: 'ASC' },
     });
   }
 
-  listAll(tenantId: string): Promise<Service[]> {
+  listAllByMembership(membershipId: string): Promise<Service[]> {
     return this.services.find({
-      where: { professionalId: tenantId },
+      where: { membershipId },
       order: { name: 'ASC' },
     });
   }
 
-  async findById(tenantId: string, id: string): Promise<Service> {
-    const service = await this.services.findOne({
-      where: { id, professionalId: tenantId },
-    });
+  async findByMembership(membershipId: string, id: string): Promise<Service> {
+    const service = await this.services.findOne({ where: { id, membershipId } });
     if (!service) throw new NotFoundException('Servicio no encontrado');
     return service;
   }
 
-  create(tenantId: string, dto: CreateServiceDto): Promise<Service> {
-    // Default: si no manda ninguna opción, queda "sin pago".
+  async createForMembership(membershipId: string, dto: CreateServiceDto): Promise<Service> {
+    // La membresía nos da el professional dueño (para el tenanting legacy).
+    const membership = await this.comercios.getMembershipById(membershipId);
+
     const allowDeposit = dto.allowDeposit ?? false;
     const allowFullPayment = dto.allowFullPayment ?? false;
     const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment);
@@ -62,7 +65,8 @@ export class CatalogService {
     this.assertPaymentOptions({ allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents });
 
     const service = this.services.create({
-      professionalId: tenantId,
+      professionalId: membership.professionalId,
+      membershipId,
       name: dto.name,
       durationMinutes: dto.durationMinutes,
       priceCents: dto.priceCents,
@@ -75,8 +79,12 @@ export class CatalogService {
     return this.services.save(service);
   }
 
-  async update(tenantId: string, id: string, dto: UpdateServiceDto): Promise<Service> {
-    const service = await this.findById(tenantId, id);
+  async updateByMembership(
+    membershipId: string,
+    id: string,
+    dto: UpdateServiceDto,
+  ): Promise<Service> {
+    const service = await this.findByMembership(membershipId, id);
     this.assertPaymentOptions({
       allowDeposit: dto.allowDeposit ?? service.allowDeposit,
       allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
@@ -87,9 +95,38 @@ export class CatalogService {
     return this.services.save(service);
   }
 
-  async deactivate(tenantId: string, id: string): Promise<Service> {
-    const service = await this.findById(tenantId, id);
+  async deactivateByMembership(membershipId: string, id: string): Promise<Service> {
+    const service = await this.findByMembership(membershipId, id);
     service.isActive = false;
     return this.services.save(service);
+  }
+
+  // ---- Compat por professional (comercio-de-uno): resuelve la membresía personal ----
+  private personalMembershipId(professionalId: string): Promise<string> {
+    return this.comercios.getPersonalMembership(professionalId).then((m) => m.id);
+  }
+
+  async listActive(professionalId: string): Promise<Service[]> {
+    return this.listActiveByMembership(await this.personalMembershipId(professionalId));
+  }
+
+  async listAll(professionalId: string): Promise<Service[]> {
+    return this.listAllByMembership(await this.personalMembershipId(professionalId));
+  }
+
+  async findById(professionalId: string, id: string): Promise<Service> {
+    return this.findByMembership(await this.personalMembershipId(professionalId), id);
+  }
+
+  async create(professionalId: string, dto: CreateServiceDto): Promise<Service> {
+    return this.createForMembership(await this.personalMembershipId(professionalId), dto);
+  }
+
+  async update(professionalId: string, id: string, dto: UpdateServiceDto): Promise<Service> {
+    return this.updateByMembership(await this.personalMembershipId(professionalId), id, dto);
+  }
+
+  async deactivate(professionalId: string, id: string): Promise<Service> {
+    return this.deactivateByMembership(await this.personalMembershipId(professionalId), id);
   }
 }

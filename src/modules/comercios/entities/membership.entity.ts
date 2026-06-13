@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, Unique } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
 import { MembershipStatus } from '@/common/enums';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
@@ -39,4 +39,12 @@ export class Membership extends BaseEntity {
     default: MembershipStatus.Active,
   })
   status!: MembershipStatus;
+
+  /**
+   * Dirección propia del profesional EN este comercio (ej. atiende a domicilio o
+   * en otra sede). NULL = se usa la dirección del comercio (fallback).
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ type: 'text', nullable: true })
+  address!: string | null;
 }

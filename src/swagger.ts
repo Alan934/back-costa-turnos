@@ -24,11 +24,21 @@ export function buildSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
 }
 
 /**
- * operationId = nombre del metodo del controller (camelCase). Asi orval genera
- * hooks limpios (p.ej. `useListAppointments`) en vez de `AppointmentsController_list`.
+ * operationId = recurso del controller + metodo, en camelCase
+ * (p.ej. `appointmentsList`, `catalogCreate`, `publicBookingBook`). Asi todos los
+ * operationId son UNICOS (OpenAPI valido) y orval genera hooks limpios sin que el
+ * front tenga que deduplicar. Un `@ApiOperation({ operationId })` explicito en un
+ * handler tiene prioridad sobre esta fabrica.
  */
+function controllerResource(controllerKey: string): string {
+  // 'AppointmentsController' -> 'appointments'; 'ComercioCatalogController' -> 'comercioCatalog'
+  const base = controllerKey.replace(/Controller$/, '');
+  return base.charAt(0).toLowerCase() + base.slice(1);
+}
+
 export const swaggerDocumentOptions = {
-  operationIdFactory: (_controllerKey: string, methodKey: string): string => methodKey,
+  operationIdFactory: (controllerKey: string, methodKey: string): string =>
+    `${controllerResource(controllerKey)}${methodKey.charAt(0).toUpperCase()}${methodKey.slice(1)}`,
 } as const;
 
 export const swaggerUiOptions: SwaggerCustomOptions = {

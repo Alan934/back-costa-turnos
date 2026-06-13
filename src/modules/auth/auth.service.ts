@@ -73,13 +73,20 @@ export class AuthService {
       professionalId ??= staffMember.professionalId;
     }
 
-    // Comercios que administra (comercial). El comercio-de-uno (isPersonal) no
-    // otorga el rol comercial, pero sí se incluye en comercioIds.
+    // comercioIds = todos los comercios donde el account puede operar:
+    //  - los que administra como comercial (owned), y
+    //  - donde trabaja como profesional (membresías activas, incl. comercio-de-uno).
+    // El rol comercial solo lo otorga ADMINISTRAR un comercio NO personal.
     const ownedComercios = await this.comercios.getOwnedComercios(account.id);
-    const comercioIds = ownedComercios.map((c) => c.id);
     if (ownedComercios.some((c) => !c.isPersonal)) {
       roles.push(AppRole.Comercial);
     }
+    const membershipComercioIds = professionalId
+      ? await this.comercios.listMembershipComercioIds(professionalId)
+      : [];
+    const comercioIds = [
+      ...new Set([...ownedComercios.map((c) => c.id), ...membershipComercioIds]),
+    ];
 
     return {
       sub: account.id,

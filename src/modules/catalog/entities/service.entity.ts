@@ -2,12 +2,16 @@ import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
 
 /**
  * Catalogo de servicios. Define duracion (bloqueo de calendario) y politica de sena.
+ * Pertenece a una membresia (profesional-en-comercio): cada profesional define
+ * sus servicios/precios por comercio. `professional_id` se mantiene (dueño/worker).
  */
 @Entity('service')
 @Index('idx_service_tenant', ['professionalId'])
+@Index('idx_service_membership', ['membershipId'])
 export class Service extends BaseEntity {
   @ApiProperty({ format: 'uuid' })
   @Column({ name: 'professional_id', type: 'uuid' })
@@ -16,6 +20,15 @@ export class Service extends BaseEntity {
   @ManyToOne(() => Professional, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'professional_id' })
   professional?: Professional;
+
+  /** Membresia (profesional-en-comercio) a la que pertenece este servicio. */
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'membership_id', type: 'uuid' })
+  membershipId!: string;
+
+  @ManyToOne(() => Membership, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'membership_id' })
+  membership?: Membership;
 
   @ApiProperty()
   @Column({ type: 'text' })

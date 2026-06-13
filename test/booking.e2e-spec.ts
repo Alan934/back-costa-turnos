@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DateTime } from 'luxon';
 import { AppModule } from '@/app.module';
-import { AppointmentStatus, CancellationReason, DepositMode } from '@/common/enums';
+import { AppointmentStatus, CancellationReason } from '@/common/enums';
 
 /**
  * E2E del flujo de reserva. Requiere Postgres + Redis levantados y la migracion
@@ -40,24 +40,14 @@ describe('Booking flow (e2e)', () => {
     await app?.close();
   });
 
-  it('registra y onboarda un professional', async () => {
+  it('registra un professional (cuenta + comercio-de-uno + trial)', async () => {
+    slug = `pro-${Date.now()}`;
     const reg = await http
-      .post('/auth/register')
-      .send({ email, password: 'secret123', fullName: 'Pro Test' })
+      .post('/auth/register-professional')
+      .send({ email, password: 'secret123', fullName: 'Pro Test', businessName: 'Test Shop', slug })
       .expect(201);
     accessToken = reg.body.accessToken;
     expect(accessToken).toBeDefined();
-
-    slug = `pro-${Date.now()}`;
-    await http
-      .post('/v1/professionals/onboard')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({ businessName: 'Test Shop', slug })
-      .expect(201);
-
-    // re-login para que el token traiga professionalId
-    const login = await http.post('/auth/login').send({ email, password: 'secret123' }).expect(200);
-    accessToken = login.body.accessToken;
   });
 
   it('crea staff implicito, servicio hibrido y horarios', async () => {
@@ -74,7 +64,9 @@ describe('Booking flow (e2e)', () => {
         name: 'Corte',
         durationMinutes: 30,
         priceCents: 500000,
-        depositMode: DepositMode.Hybrid,
+        allowDeposit: true,
+        allowFullPayment: true,
+        allowNoPayment: true,
         depositAmountCents: 200000,
       })
       .expect(201);

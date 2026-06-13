@@ -58,6 +58,37 @@ export class BookWithDepositDto extends BookAppointmentDto {
   paymentOption?: PaymentOption;
 }
 
+/**
+ * Reserva pública en un comercio (el profesional sale del membershipId de la ruta,
+ * el staff se resuelve solo). No requiere staffId.
+ */
+export class PublicBookDto extends ClientRefDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  serviceId!: string;
+
+  @ApiProperty({ example: '2026-06-10T13:00:00Z' })
+  @IsISO8601()
+  startAt!: string;
+}
+
+export class PublicBookWithDepositDto extends PublicBookDto {
+  @ApiProperty({ enum: PaymentMethod, example: PaymentMethod.MercadoPago })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @ApiPropertyOptional({
+    enum: PaymentOption,
+    enumName: 'PaymentOption',
+    default: PaymentOption.Deposit,
+    description: 'deposit = seña, full = pago completo',
+  })
+  @IsOptional()
+  @IsEnum(PaymentOption)
+  paymentOption?: PaymentOption;
+}
+
 export class ConfirmDepositDto {
   @ApiProperty({ enum: PaymentMethod })
   @IsEnum(PaymentMethod)

@@ -4,18 +4,26 @@ import { ProfessionalsModule } from '@/modules/professionals/professionals.modul
 import { CatalogModule } from '@/modules/catalog/catalog.module';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { ScheduleRule } from './entities/schedule-rule.entity';
+import { ScheduleRuleService } from './entities/schedule-rule-service.entity';
 import { TimeOff } from './entities/time-off.entity';
 import { StaffCalendarIntegration } from './entities/staff-calendar-integration.entity';
 import { AvailabilityService } from './availability.service';
 import { AvailabilityController } from './availability.controller';
+import { ComercioAvailabilityController } from './comercio-availability.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ScheduleRule, TimeOff, StaffCalendarIntegration, Appointment]),
+    TypeOrmModule.forFeature([
+      ScheduleRule,
+      ScheduleRuleService,
+      TimeOff,
+      StaffCalendarIntegration,
+      Appointment,
+    ]),
     ProfessionalsModule,
     CatalogModule,
   ],
-  controllers: [AvailabilityController],
+  controllers: [AvailabilityController, ComercioAvailabilityController],
   providers: [AvailabilityService],
   exports: [AvailabilityService],
 })

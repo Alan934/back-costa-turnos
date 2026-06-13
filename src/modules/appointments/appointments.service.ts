@@ -19,6 +19,7 @@ import {
 } from '@/common/enums';
 import { TenantContextService } from '@/common/context/tenant-context.service';
 import { PersonsService } from '@/modules/identity/persons.service';
+import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
@@ -43,11 +44,56 @@ export class AppointmentsService {
     private readonly services: Repository<Service>,
     @InjectRepository(Payment)
     private readonly payments: Repository<Payment>,
+    @InjectRepository(Staff)
+    private readonly staff: Repository<Staff>,
     private readonly persons: PersonsService,
     private readonly tenantContext: TenantContextService,
     private readonly notifications: NotificationsService,
     private readonly waitingRoom: WaitingRoomGateway,
+    private readonly comercios: ComerciosService,
   ) {}
+
+  /**
+   * Resuelve professionalId + staffId a partir de una membresía (para reservas
+   * públicas en un comercio, donde el cliente elige al profesional, no el staff).
+   */
+  private async resolveMembershipBookingTarget(
+    membershipId: string,
+  ): Promise<{ professionalId: string; staffId: string }> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    const staff = await this.staff.findOne({
+      where: { professionalId: membership.professionalId },
+    });
+    if (!staff) throw new NotFoundException('El profesional no tiene agenda configurada');
+    return { professionalId: membership.professionalId, staffId: staff.id };
+  }
+
+  /** Reserva pública (sin pago) en un comercio, eligiendo al profesional por membresía. */
+  async bookForMembership(
+    membershipId: string,
+    dto: { serviceId: string; startAt: string } & ClientRefDto,
+    createdVia: CreatedVia,
+  ): Promise<Appointment> {
+    const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    return this.book(professionalId, { ...dto, staffId }, createdVia);
+  }
+
+  /** Reserva pública con seña/pago completo en un comercio, eligiendo al profesional. */
+  async bookWithDepositForMembership(
+    membershipId: string,
+    dto: { serviceId: string; startAt: string; method: PaymentMethod; paymentOption?: PaymentOption } & ClientRefDto,
+  ): Promise<{ appointment: Appointment; payment: Payment }> {
+    const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    return this.bookWithDeposit(professionalId, { ...dto, staffId });
+  }
+
+  /** comercio_id/membership_id donde ocurre el turno (a partir del servicio). */
+  private async resolveComercioContext(
+    service: Service,
+  ): Promise<{ comercioId: string; membershipId: string }> {
+    const membership = await this.comercios.getMembershipById(service.membershipId);
+    return { comercioId: membership.comercioId, membershipId: membership.id };
+  }
 
   private async resolvePersonId(ref: ClientRefDto): Promise<string> {
     if (ref.personId) {
@@ -122,8 +168,11 @@ export class AppointmentsService {
 
     // Provisional (desplazable) solo si el servicio también admite pago.
     const hasPaidOption = service.allowDeposit || service.allowFullPayment;
+    const { comercioId, membershipId } = await this.resolveComercioContext(service);
     const appointment = this.appointments.create({
       professionalId: tenantId,
+      comercioId,
+      membershipId,
       staffId: dto.staffId,
       personId,
       serviceId: service.id,
@@ -172,6 +221,7 @@ export class AppointmentsService {
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
     const personId = await this.resolvePersonId(dto);
+    const { comercioId, membershipId } = await this.resolveComercioContext(service);
 
     return this.tenantContext.runWithTenant(tenantId, async (manager) => {
       // Mutex: serializa las operaciones de sena de este staff.
@@ -204,6 +254,8 @@ export class AppointmentsService {
       const appointment = await manager.save(
         manager.create(Appointment, {
           professionalId: tenantId,
+          comercioId,
+          membershipId,
           staffId: dto.staffId,
           personId,
           serviceId: service.id,

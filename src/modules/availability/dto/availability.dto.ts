@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 import { ScheduleRuleKind } from '@/common/enums';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
@@ -23,6 +34,16 @@ export class CreateScheduleRuleDto {
   @IsOptional()
   @IsEnum(ScheduleRuleKind)
   kind?: ScheduleRuleKind;
+
+  /**
+   * Servicios a los que aplica esta regla. Vacío/omitido = aplica a TODOS los
+   * servicios de la membresía. Solo tiene efecto en reglas de trabajo (work).
+   */
+  @ApiPropertyOptional({ type: [String], format: 'uuid' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('all', { each: true })
+  serviceIds?: string[];
 }
 
 export class CreateTimeOffDto {
@@ -45,6 +66,21 @@ export class AvailabilityQueryDto {
   @IsString()
   staffId!: string;
 
+  @ApiProperty()
+  @IsString()
+  serviceId!: string;
+
+  @ApiProperty({ example: '2026-06-10', description: 'fecha desde (YYYY-MM-DD)' })
+  @IsISO8601()
+  from!: string;
+
+  @ApiProperty({ example: '2026-06-17', description: 'fecha hasta (YYYY-MM-DD)' })
+  @IsISO8601()
+  to!: string;
+}
+
+/** Query de slots por comercio (la membresía la resuelve el guard). */
+export class ComercioSlotsQueryDto {
   @ApiProperty()
   @IsString()
   serviceId!: string;

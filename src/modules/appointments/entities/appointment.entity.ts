@@ -6,13 +6,18 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
 
 /**
  * Turno. Incluye el flujo de sena (none/required/hybrid) y la sala de espera.
+ * `professional_id` (worker, dueño del cliente + enforcement de suscripcion) se
+ * mantiene; ademas se cuelga del `comercio_id`/`membership_id` donde ocurre.
  */
 @Entity('appointment')
 @Index('idx_appointment_tenant_start', ['professionalId', 'startAt'])
 @Index('idx_appointment_staff_start', ['staffId', 'startAt'])
+@Index('idx_appointment_membership_start', ['membershipId', 'startAt'])
 @Index('idx_appointment_status', ['professionalId', 'status'])
 export class Appointment extends BaseEntity {
   @ApiProperty({ format: 'uuid' })
@@ -22,6 +27,24 @@ export class Appointment extends BaseEntity {
   @ManyToOne(() => Professional, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'professional_id' })
   professional?: Professional;
+
+  /** Comercio donde ocurre el turno. */
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'comercio_id', type: 'uuid' })
+  comercioId!: string;
+
+  @ManyToOne(() => Comercio, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'comercio_id' })
+  comercio?: Comercio;
+
+  /** Membresia (profesional-en-comercio) que atiende el turno. */
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'membership_id', type: 'uuid' })
+  membershipId!: string;
+
+  @ManyToOne(() => Membership, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'membership_id' })
+  membership?: Membership;
 
   @ApiProperty({ format: 'uuid' })
   @Column({ name: 'staff_id', type: 'uuid' })
