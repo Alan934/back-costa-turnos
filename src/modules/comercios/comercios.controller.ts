@@ -12,14 +12,20 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ComercioOwnerGuard } from '@/common/guards/comercio-owner.guard';
+import { ComercioMembershipGuard } from '@/common/guards/comercio-membership.guard';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
-import { CurrentComercio } from '@/common/decorators/current-comercio.decorator';
+import { CurrentComercio, CurrentMembership } from '@/common/decorators/current-comercio.decorator';
 import { ComerciosService } from './comercios.service';
 import { InvitationsService } from './invitations.service';
 import { Comercio } from './entities/comercio.entity';
 import { Membership } from './entities/membership.entity';
 import { ComercioInvitation } from './entities/comercio-invitation.entity';
-import { AcceptInvitationDto, InviteProfessionalDto, UpdateComercioDto } from './dto/comercio.dto';
+import {
+  AcceptInvitationDto,
+  InviteProfessionalDto,
+  UpdateComercioDto,
+  UpdateMembershipDto,
+} from './dto/comercio.dto';
 
 @ApiTags('comercios')
 @ApiBearerAuth()
@@ -45,6 +51,21 @@ export class ComerciosController {
   @Post('invitations/accept')
   accept(@CurrentAccount('sub') accountId: string, @Body() dto: AcceptInvitationDto) {
     return this.invitations.accept(accountId, dto.token);
+  }
+
+  @ApiOperation({
+    summary: 'Editar mi membresía en un comercio (p.ej. mi dirección propia)',
+    description: 'El profesional edita su propia membresía en el comercio donde es miembro activo.',
+  })
+  @ApiResponse({ status: 200, type: Membership })
+  @ApiResponse({ status: 403, description: 'No tenés membresía activa en este comercio' })
+  @UseGuards(ComercioMembershipGuard)
+  @Patch(':comercioId/membership')
+  updateMyMembership(
+    @CurrentMembership() membershipId: string,
+    @Body() dto: UpdateMembershipDto,
+  ) {
+    return this.comercios.updateMembership(membershipId, dto);
   }
 
   // ---- Scope comercial (dueño del comercio) ----

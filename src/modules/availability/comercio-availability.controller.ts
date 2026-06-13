@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -22,6 +23,7 @@ import {
   ComercioSlotsQueryDto,
   CreateScheduleRuleDto,
   CreateTimeOffDto,
+  UpdateScheduleRuleDto,
 } from './dto/availability.dto';
 
 /**
@@ -72,6 +74,18 @@ export class ComercioAvailabilityController {
     @Body() dto: CreateScheduleRuleDto,
   ) {
     return this.availability.createScheduleRuleForMembership(membershipId, dto);
+  }
+
+  @ApiOperation({ summary: 'Editar regla de horario in-place (incluye remapear serviceIds)' })
+  @ApiResponse({ status: 200, type: ScheduleRule })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Patch('schedule/:id')
+  updateScheduleRule(
+    @CurrentMembership() membershipId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateScheduleRuleDto,
+  ) {
+    return this.availability.updateScheduleRuleForMembership(membershipId, id, dto);
   }
 
   @ApiOperation({ summary: 'Eliminar regla de horario' })

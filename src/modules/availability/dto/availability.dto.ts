@@ -46,6 +46,45 @@ export class CreateScheduleRuleDto {
   serviceIds?: string[];
 }
 
+/**
+ * Edición in-place de una regla de horario. Todos los campos son opcionales: solo
+ * se actualiza lo enviado. `serviceIds` presente REEMPLAZA el mapeo (vacío = vuelve
+ * a "todos los servicios"); omitido lo deja como estaba.
+ */
+export class UpdateScheduleRuleDto {
+  @ApiPropertyOptional({ example: 1, description: '0=domingo ... 6=sabado' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  dayOfWeek?: number;
+
+  @ApiPropertyOptional({ example: '09:00' })
+  @IsOptional()
+  @Matches(TIME_REGEX, { message: 'start_time debe ser HH:mm' })
+  startTime?: string;
+
+  @ApiPropertyOptional({ example: '13:00' })
+  @IsOptional()
+  @Matches(TIME_REGEX, { message: 'end_time debe ser HH:mm' })
+  endTime?: string;
+
+  @ApiPropertyOptional({ enum: ScheduleRuleKind })
+  @IsOptional()
+  @IsEnum(ScheduleRuleKind)
+  kind?: ScheduleRuleKind;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    description: 'Reemplaza el mapeo de servicios. Vacío = todos. Omitido = sin cambios.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('all', { each: true })
+  serviceIds?: string[];
+}
+
 export class CreateTimeOffDto {
   @ApiProperty({ example: '2026-07-01T00:00:00Z' })
   @IsISO8601()

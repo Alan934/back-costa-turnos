@@ -11,7 +11,12 @@ import { Appointment } from '@/modules/appointments/entities/appointment.entity'
 import { ScheduleRule } from './entities/schedule-rule.entity';
 import { ScheduleRuleService } from './entities/schedule-rule-service.entity';
 import { TimeOff } from './entities/time-off.entity';
-import { AvailableSlot, CreateScheduleRuleDto, CreateTimeOffDto } from './dto/availability.dto';
+import {
+  AvailableSlot,
+  CreateScheduleRuleDto,
+  CreateTimeOffDto,
+  UpdateScheduleRuleDto,
+} from './dto/availability.dto';
 
 // Estados de turno que ocupan un horario (no se pueden pisar).
 const BLOCKING_STATUSES = [
@@ -101,6 +106,43 @@ export class AvailabilityService {
     );
     await this.saveRuleServices(rule.id, serviceIds);
     return Object.assign(rule, { serviceIds });
+  }
+
+  /**
+   * Edita una regla in-place. Solo cambia lo enviado. Si `serviceIds` viene, REEMPLAZA
+   * el mapeo (vacío = todos); si se omite, lo deja como estaba. Devuelve la regla con
+   * sus serviceIds actuales.
+   */
+  async updateScheduleRuleForMembership(
+    membershipId: string,
+    id: string,
+    dto: UpdateScheduleRuleDto,
+  ): Promise<ScheduleRule> {
+    const rule = await this.scheduleRules.findOne({ where: { id, membershipId } });
+    if (!rule) throw new NotFoundException('Regla no encontrada');
+
+    const startTime = dto.startTime ?? rule.startTime;
+    const endTime = dto.endTime ?? rule.endTime;
+    if (startTime >= endTime) {
+      throw new BadRequestException('start_time debe ser anterior a end_time');
+    }
+
+    if (dto.dayOfWeek !== undefined) rule.dayOfWeek = dto.dayOfWeek;
+    rule.startTime = startTime;
+    rule.endTime = endTime;
+    if (dto.kind !== undefined) rule.kind = dto.kind;
+    await this.scheduleRules.save(rule);
+
+    // serviceIds presente => reemplaza el mapeo; omitido => no se toca.
+    if (dto.serviceIds !== undefined) {
+      const serviceIds = await this.validateRuleServices(membershipId, dto.serviceIds);
+      await this.scheduleRuleServices.delete({ scheduleRuleId: id });
+      await this.saveRuleServices(id, serviceIds);
+      return Object.assign(rule, { serviceIds });
+    }
+
+    const byRule = await this.serviceIdsByRule([id]);
+    return Object.assign(rule, { serviceIds: byRule.get(id) ?? [] });
   }
 
   async deleteScheduleRuleByMembership(membershipId: string, id: string): Promise<void> {

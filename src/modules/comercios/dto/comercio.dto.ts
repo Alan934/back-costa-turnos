@@ -42,6 +42,18 @@ export class UpdateComercioDto {
   timezone?: string;
 }
 
+/** El profesional edita SU membresía en un comercio (p.ej. su dirección propia). */
+export class UpdateMembershipDto {
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Dirección propia en este comercio. null/"" = usa la del comercio (fallback).',
+  })
+  @IsOptional()
+  @IsString()
+  address?: string | null;
+}
+
 export class InviteProfessionalDto {
   @ApiProperty({ example: 'profesional@mail.com' })
   @IsEmail()
