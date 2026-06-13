@@ -120,10 +120,14 @@ export class AppointmentsService {
     return service;
   }
 
-  /** Turnos que se solapan con [start,end) para un staff (estados activos). */
+  /**
+   * Turnos del PROFESIONAL que se solapan con [start,end) (estados activos). El
+   * conflicto es por profesional, no por staff/comercio: un profesional no puede
+   * estar en dos lugares a la vez (su agenda es única en todos sus comercios).
+   */
   private overlapping(
     manager: EntityManager | Repository<Appointment>,
-    staffId: string,
+    professionalId: string,
     start: Date,
     end: Date,
   ): Promise<Appointment[]> {
@@ -131,7 +135,7 @@ export class AppointmentsService {
     // Solape: start < existing.end AND end > existing.start
     return repo
       .createQueryBuilder('a')
-      .where('a.staff_id = :staffId', { staffId })
+      .where('a.professional_id = :professionalId', { professionalId })
       .andWhere('a.status IN (:...statuses)', { statuses: ACTIVE_STATUSES })
       .andWhere('a.start_at < :end AND a.end_at > :start', { start, end })
       .getMany();
@@ -158,7 +162,7 @@ export class AppointmentsService {
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
     const personId = await this.resolvePersonId(dto);
 
-    const conflicts = await this.overlapping(this.appointments, dto.staffId, startAt, endAt);
+    const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
     // Cualquier turno activo (incluido un provisional) bloquea una reserva casual.
     if (conflicts.length > 0) {
       throw new ConflictException(
@@ -224,13 +228,14 @@ export class AppointmentsService {
     const { comercioId, membershipId } = await this.resolveComercioContext(service);
 
     return this.tenantContext.runWithTenant(tenantId, async (manager) => {
-      // Mutex: serializa las operaciones de sena de este staff.
-      await manager.findOneOrFail(Staff, {
-        where: { id: dto.staffId },
-        lock: { mode: 'pessimistic_write' },
-      });
+      // Mutex: serializa las reservas de seña de este PROFESIONAL (su agenda es
+      // única en todos sus comercios, no puede estar en dos lugares a la vez).
+      // Advisory lock por transacción (se libera al COMMIT/ROLLBACK): no toma row
+      // lock sobre `professional` (tabla referenciada por payments/notifications),
+      // evitando contención con esos INSERT.
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [tenantId]);
 
-      const conflicts = await this.overlapping(manager, dto.staffId, startAt, endAt);
+      const conflicts = await this.overlapping(manager, tenantId, startAt, endAt);
 
       const firmConflict = conflicts.find((a) => !a.isProvisional);
       if (firmConflict) {

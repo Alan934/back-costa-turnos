@@ -99,6 +99,15 @@ export class ComerciosService {
     return rows.map((m) => m.comercioId);
   }
 
+  /** IDs de TODAS las membresías activas del profesional (para agenda unificada). */
+  async listMembershipIds(professionalId: string): Promise<string[]> {
+    const rows = await this.memberships.find({
+      where: { professionalId, status: MembershipStatus.Active },
+      select: { id: true },
+    });
+    return rows.map((m) => m.id);
+  }
+
   /**
    * Crea un comercio-de-uno (isPersonal) para un profesional solo + su membresía
    * activa. Se usa al registrarse/onboardear un profesional. Idempotente por slug.

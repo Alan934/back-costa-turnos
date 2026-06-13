@@ -255,10 +255,16 @@ export class AvailabilityService {
     const utcStart = rangeStart.toUTC().toJSDate();
     const utcEnd = rangeEnd.toUTC().toJSDate();
 
-    const timeOffs = await this.timeOffs.find({ where: { membershipId } });
+    // Disponibilidad por PROFESIONAL: sus turnos y bloqueos en TODOS sus comercios
+    // ocupan el horario (no puede estar en dos lugares a la vez).
+    const professionalId = membership.professionalId;
+    const membershipIds = await this.comercios.listMembershipIds(professionalId);
+    const timeOffs = membershipIds.length
+      ? await this.timeOffs.find({ where: { membershipId: In(membershipIds) } })
+      : [];
     const busy = await this.appointments.find({
       where: {
-        membershipId,
+        professionalId,
         status: In(BLOCKING_STATUSES),
         startAt: Between(utcStart, utcEnd),
       },
