@@ -9,11 +9,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class CreateRaffleDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   name!: string;
 }
 
@@ -21,6 +23,7 @@ export class CreatePrizeDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   name!: string;
 
   @ApiPropertyOptional({ description: 'object_key del archivo en MinIO' })
@@ -58,6 +61,7 @@ export class ParticipantByEmailDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TitleCase()
   fullName?: string;
 
   @ApiProperty()

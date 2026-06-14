@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { FichaFieldType } from '@/common/enums';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class CreateFichaFieldDto {
   @ApiProperty()
@@ -51,6 +52,7 @@ export class CreateClientDto {
   @ApiProperty({ example: 'Maria Lopez' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   fullName!: string;
 
   @ApiPropertyOptional()

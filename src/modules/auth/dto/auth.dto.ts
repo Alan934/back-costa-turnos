@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { AppRole } from '@/common/enums';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'dueno@peluqueria.com' })
@@ -23,6 +24,7 @@ export class RegisterDto {
   @ApiProperty({ example: 'Juan Perez' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   fullName!: string;
 }
 
@@ -31,6 +33,7 @@ export class RegisterProfessionalDto extends RegisterDto {
   @ApiProperty({ example: 'Juan Perez Estilista', description: 'nombre visible del profesional' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   businessName!: string;
 
   @ApiProperty({ example: 'juan-estilista', description: 'slug único para su página propia' })

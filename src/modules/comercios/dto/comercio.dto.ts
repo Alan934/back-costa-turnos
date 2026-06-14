@@ -11,12 +11,15 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { TitleCase } from '@/common/decorators/title-case.decorator';
+
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export class CreateComercioDto {
   @ApiProperty({ example: 'Peluquería Centro' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   name!: string;
 
   @ApiProperty({ example: 'peluqueria-centro', description: 'slug único para /r/:slug' })
@@ -39,6 +42,7 @@ export class UpdateComercioDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TitleCase()
   name?: string;
 
   @ApiPropertyOptional()
@@ -103,6 +107,7 @@ export class CreateComercialDto {
   @ApiProperty({ example: 'Peluquería Centro' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   comercioName!: string;
 
   @ApiProperty({ example: 'peluqueria-centro' })

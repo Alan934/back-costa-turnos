@@ -1,10 +1,12 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class CreateServiceDto {
   @ApiProperty({ example: 'Corte de pelo' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   name!: string;
 
   @ApiProperty({ example: 30, description: 'duracion en minutos' })

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 /**
  * Alta de un profesional por el admin: crea la cuenta (sin reclamar) y el
@@ -14,6 +15,7 @@ export class AdminCreateProfessionalDto {
   @ApiProperty({ example: 'Peluqueria Mi Pueblo' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   businessName!: string;
 
   @ApiProperty({ example: 'mi-peluqueria', description: 'slug unico para /r/:slug' })
@@ -33,6 +35,7 @@ export class AdminCreateClientDto {
   @ApiProperty({ example: 'Maria Lopez' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   fullName!: string;
 
   @ApiProperty({ required: false, example: 'maria@mail.com' })

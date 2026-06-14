@@ -2,11 +2,13 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min } from 'class-validator';
 import { DepositMode } from '@/common/enums';
 import { IsEnum } from 'class-validator';
+import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class OnboardProfessionalDto {
   @ApiProperty({ example: 'Peluqueria Mi Pueblo' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   businessName!: string;
 
   @ApiProperty({ example: 'mi-peluqueria', description: 'slug unico para /r/:slug' })
@@ -31,6 +33,7 @@ export class UpdateProfessionalDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TitleCase()
   businessName?: string;
 
   @ApiPropertyOptional()
@@ -59,6 +62,7 @@ export class CreateStaffDto {
   @ApiProperty({ example: 'Sillon 1 - Maria' })
   @IsString()
   @IsNotEmpty()
+  @TitleCase()
   displayName!: string;
 }
 
