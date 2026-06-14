@@ -11,6 +11,7 @@ import {
   IsString,
 } from 'class-validator';
 import { FichaFieldType } from '@/common/enums';
+import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 
 export class CreateFichaFieldDto {
   @ApiProperty()
@@ -57,9 +58,9 @@ export class CreateClientDto {
   @IsEmail()
   email?: string;
 
-  @ApiPropertyOptional({ example: '+54 9 11 5555-5555' })
+  @ApiPropertyOptional({ example: '2612465120', description: PHONE_DESCRIPTION })
   @IsOptional()
-  @IsString()
+  @IsPhone()
   phone?: string;
 
   @ApiPropertyOptional({ description: 'valores de ficha indexados por ficha_field.id' })

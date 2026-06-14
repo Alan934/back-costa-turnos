@@ -106,6 +106,7 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Invitar un profesional por email' })
   @ApiResponse({ status: 201, type: ComercioInvitation })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiResponse({ status: 404, description: 'No existe un profesional con ese email' })
   @UseGuards(ComercioOwnerGuard)
   @Post(':comercioId/invitations')
   invite(@CurrentComercio() comercioId: string, @Body() dto: InviteProfessionalDto) {

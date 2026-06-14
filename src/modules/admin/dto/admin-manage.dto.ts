@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
+import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 
 /**
  * Alta de un profesional por el admin: crea la cuenta (sin reclamar) y el
@@ -39,8 +40,8 @@ export class AdminCreateClientDto {
   @IsEmail()
   email?: string;
 
-  @ApiProperty({ required: false, example: '+54 9 11 5555-5555' })
+  @ApiProperty({ required: false, example: '2612465120', description: PHONE_DESCRIPTION })
   @IsOptional()
-  @IsString()
+  @IsPhone()
   phone?: string;
 }

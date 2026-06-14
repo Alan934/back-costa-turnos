@@ -209,6 +209,13 @@ export class ComerciosService {
     return this.professionals.findOne({ where: { accountId } });
   }
 
+  /** professional (worker) por email de su cuenta, o null. */
+  async findProfessionalByEmail(email: string): Promise<Professional | null> {
+    const account = await this.accounts.findByEmail(email);
+    if (!account) return null;
+    return this.findProfessionalByAccount(account.id);
+  }
+
   /** Membresia activa de un profesional en un comercio (o lanza 404). */
   async getActiveMembership(professionalId: string, comercioId: string): Promise<Membership> {
     const membership = await this.memberships.findOne({

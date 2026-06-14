@@ -23,6 +23,12 @@ export class InvitationsService {
   async invite(comercioId: string, email: string): Promise<ComercioInvitation> {
     const comercio = await this.comercios.getComercio(comercioId);
 
+    // El profesional debe existir (cuenta de profesional con ese email).
+    const professional = await this.comercios.findProfessionalByEmail(email);
+    if (!professional) {
+      throw new NotFoundException('No existe un profesional con ese email');
+    }
+
     const token = randomBytes(24).toString('base64url');
     const invitation = await this.invitations.save(
       this.invitations.create({

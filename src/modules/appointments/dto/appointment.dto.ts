@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsEnum, IsISO8601, IsOptional, IsString, IsNotEmpty } from 'class-validator';
 import { CancellationReason, PaymentMethod, PaymentOption } from '@/common/enums';
+import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 
 /** Datos del cliente: o un personId existente, o info para find-or-create. */
 export class ClientRefDto {
@@ -19,9 +20,9 @@ export class ClientRefDto {
   @IsEmail()
   email?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '2612465120', description: PHONE_DESCRIPTION })
   @IsOptional()
-  @IsString()
+  @IsPhone()
   phone?: string;
 }
 
