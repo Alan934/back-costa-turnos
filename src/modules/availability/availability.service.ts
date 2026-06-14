@@ -278,6 +278,7 @@ export class AvailabilityService {
       breaksByDay,
       timeOffs,
       busy,
+      minBookingHours: membership.minBookingHours,
     });
   }
 
@@ -290,6 +291,7 @@ export class AvailabilityService {
     breaksByDay: Map<number, ScheduleRule[]>;
     timeOffs: TimeOff[];
     busy: Appointment[];
+    minBookingHours?: number;
   }): AvailableSlot[] {
     const { rangeStart, rangeEnd, duration, workByDay, breaksByDay, timeOffs, busy } = args;
     const occupied: Interval[] = [
@@ -301,7 +303,9 @@ export class AvailabilityService {
       ),
     ];
 
-    const now = DateTime.now();
+    // Punto de corte: un slot debe empezar a partir de "ahora + anticipación
+    // mínima". Con minBookingHours=0 equivale a "no en el pasado".
+    const earliestStart = DateTime.now().plus({ hours: args.minBookingHours ?? 0 });
     const slots: AvailableSlot[] = [];
 
     for (let day = rangeStart; day <= rangeEnd; day = day.plus({ days: 1 }).startOf('day')) {
@@ -332,9 +336,9 @@ export class AvailabilityService {
           });
 
           const overlapsOccupied = occupied.some((o) => slotInterval.overlaps(o));
-          const isPast = slotStart < now;
+          const tooSoon = slotStart < earliestStart;
 
-          if (!overlapsBreak && !overlapsOccupied && !isPast) {
+          if (!overlapsBreak && !overlapsOccupied && !tooSoon) {
             slots.push({
               startAt: slotStart.toUTC().toISO()!,
               endAt: slotEnd.toUTC().toISO()!,

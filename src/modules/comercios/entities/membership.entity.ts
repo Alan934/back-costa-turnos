@@ -47,4 +47,13 @@ export class Membership extends BaseEntity {
   @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })
   address!: string | null;
+
+  /**
+   * Anticipación mínima de reserva (en horas): un cliente solo puede reservar un
+   * turno cuyo inicio esté al menos estas horas en el futuro. 0 = sin restricción.
+   * Lo define el profesional para su agenda en este comercio.
+   */
+  @ApiProperty({ type: Number, example: 8 })
+  @Column({ name: 'min_booking_hours', type: 'int', default: 0 })
+  minBookingHours!: number;
 }

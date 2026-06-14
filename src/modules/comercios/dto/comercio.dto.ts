@@ -1,5 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -52,6 +62,18 @@ export class UpdateMembershipDto {
   @IsOptional()
   @IsString()
   address?: string | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    example: 8,
+    description:
+      'Anticipación mínima de reserva, en horas. Un cliente solo puede reservar un turno que empiece al menos estas horas en el futuro. 0 = sin restricción.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(720)
+  minBookingHours?: number;
 }
 
 export class InviteProfessionalDto {

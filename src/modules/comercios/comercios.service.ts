@@ -243,12 +243,15 @@ export class ComerciosService {
   /** Edita una membresía (p.ej. la dirección propia del profesional en el comercio). */
   async updateMembership(
     membershipId: string,
-    dto: { address?: string | null },
+    dto: { address?: string | null; minBookingHours?: number },
   ): Promise<Membership> {
     const membership = await this.getMembershipById(membershipId);
     if (dto.address !== undefined) {
       // "" o null => limpia la dirección propia (vuelve al fallback del comercio).
       membership.address = dto.address ? dto.address : null;
+    }
+    if (dto.minBookingHours !== undefined) {
+      membership.minBookingHours = dto.minBookingHours;
     }
     return this.memberships.save(membership);
   }

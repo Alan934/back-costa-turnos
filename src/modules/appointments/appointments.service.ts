@@ -90,9 +90,28 @@ export class AppointmentsService {
   /** comercio_id/membership_id donde ocurre el turno (a partir del servicio). */
   private async resolveComercioContext(
     service: Service,
-  ): Promise<{ comercioId: string; membershipId: string }> {
+  ): Promise<{ comercioId: string; membershipId: string; minBookingHours: number }> {
     const membership = await this.comercios.getMembershipById(service.membershipId);
-    return { comercioId: membership.comercioId, membershipId: membership.id };
+    return {
+      comercioId: membership.comercioId,
+      membershipId: membership.id,
+      minBookingHours: membership.minBookingHours,
+    };
+  }
+
+  /**
+   * Anticipación mínima: el turno debe empezar al menos `minBookingHours` horas
+   * después de "ahora". 0 = solo se valida que no sea en el pasado.
+   */
+  private assertLeadTime(startAt: Date, minBookingHours: number): void {
+    const earliest = Date.now() + minBookingHours * 60 * 60_000;
+    if (startAt.getTime() < earliest) {
+      throw new BadRequestException(
+        minBookingHours > 0
+          ? `El turno debe reservarse con al menos ${minBookingHours} h de anticipación`
+          : 'No se puede reservar un turno en el pasado',
+      );
+    }
   }
 
   private async resolvePersonId(ref: ClientRefDto): Promise<string> {
@@ -160,6 +179,9 @@ export class AppointmentsService {
     }
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const { comercioId, membershipId, minBookingHours } =
+      await this.resolveComercioContext(service);
+    this.assertLeadTime(startAt, minBookingHours);
     const personId = await this.resolvePersonId(dto);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
@@ -172,7 +194,6 @@ export class AppointmentsService {
 
     // Provisional (desplazable) solo si el servicio también admite pago.
     const hasPaidOption = service.allowDeposit || service.allowFullPayment;
-    const { comercioId, membershipId } = await this.resolveComercioContext(service);
     const appointment = this.appointments.create({
       professionalId: tenantId,
       comercioId,
@@ -224,8 +245,10 @@ export class AppointmentsService {
 
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const { comercioId, membershipId, minBookingHours } =
+      await this.resolveComercioContext(service);
+    this.assertLeadTime(startAt, minBookingHours);
     const personId = await this.resolvePersonId(dto);
-    const { comercioId, membershipId } = await this.resolveComercioContext(service);
 
     return this.tenantContext.runWithTenant(tenantId, async (manager) => {
       // Mutex: serializa las reservas de seña de este PROFESIONAL (su agenda es
