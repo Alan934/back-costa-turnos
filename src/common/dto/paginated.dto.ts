@@ -1,13 +1,34 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
-/** Query de paginado + busqueda libre. `page` arranca en 1. */
+/**
+ * Filtro por estado de soft-delete para los listados admin.
+ * `all` = activos + eliminados (default, no rompe el comportamiento previo).
+ */
+export enum ListStatusFilter {
+  Active = 'active',
+  Deleted = 'deleted',
+  All = 'all',
+}
+
+/** Query de paginado + busqueda libre + filtro por estado. `page` arranca en 1. */
 export class PaginationQueryDto {
   @ApiProperty({ required: false, description: 'Texto de busqueda libre' })
   @IsOptional()
   @IsString()
   q?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: ListStatusFilter,
+    enumName: 'ListStatusFilter',
+    default: ListStatusFilter.All,
+    description: 'active = solo activos; deleted = solo eliminados; all = ambos (default)',
+  })
+  @IsOptional()
+  @IsEnum(ListStatusFilter)
+  status?: ListStatusFilter = ListStatusFilter.All;
 
   @ApiProperty({ required: false, default: 1, minimum: 1, description: 'Pagina (1-based)' })
   @IsOptional()

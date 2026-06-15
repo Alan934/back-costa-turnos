@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
-import { PaginationQueryDto, resolvePagination } from '@/common/dto/paginated.dto';
+import { Brackets, In, ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm';
+import {
+  ListStatusFilter,
+  PaginationQueryDto,
+  resolvePagination,
+} from '@/common/dto/paginated.dto';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Comercio } from '@/modules/comercios/entities/comercio.entity';
@@ -39,6 +43,24 @@ export class AdminListService {
     private readonly subscriptions: Repository<Subscription>,
   ) {}
 
+  /**
+   * Aplica el filtro de estado (soft-delete) DENTRO del query builder, de modo que
+   * el COUNT del paginado refleje exactamente lo filtrado (conteos correctos por
+   * pestaña). El qb ya debe tener `.withDeleted()`.
+   */
+  private applyStatus<T extends ObjectLiteral>(
+    qb: SelectQueryBuilder<T>,
+    alias: string,
+    status: ListStatusFilter | undefined,
+  ): void {
+    if (status === ListStatusFilter.Active) {
+      qb.andWhere(`${alias}.deleted_at IS NULL`);
+    } else if (status === ListStatusFilter.Deleted) {
+      qb.andWhere(`${alias}.deleted_at IS NOT NULL`);
+    }
+    // All (o undefined): sin filtro, trae activos + eliminados.
+  }
+
   // ---- Clientes (global) ----
   async listClients(query: PaginationQueryDto): Promise<AdminClientPageDto> {
     const { page, pageSize, skip, take } = resolvePagination(query);
@@ -62,6 +84,7 @@ export class AdminListService {
         }),
       );
     }
+    this.applyStatus(qb, 'pc', query.status);
 
     const [rows, total] = await qb.getManyAndCount();
     const items: AdminClientDto[] = rows.map((pc) => ({
@@ -100,6 +123,7 @@ export class AdminListService {
         }),
       );
     }
+    this.applyStatus(qb, 'c', query.status);
 
     const [rows, total] = await qb.getManyAndCount();
 
@@ -153,6 +177,7 @@ export class AdminListService {
         }),
       );
     }
+    this.applyStatus(qb, 'p', query.status);
 
     const [rows, total] = await qb.getManyAndCount();
 

@@ -86,10 +86,11 @@ export class AdminController {
   }
 
   @ApiOperation({
-    summary: 'Listar profesionales (paginado, con busqueda, incluye eliminados)',
+    summary: 'Listar profesionales (paginado, con busqueda y filtro de estado)',
     description:
       'Devuelve { items, total, page, pageSize }. Cada item es { professional, subscription }. ' +
-      '`professional.deletedAt` (null = activo) marca los eliminados. `q` busca por nombre/slug.',
+      '`professional.deletedAt` (null = activo) marca los eliminados. `q` busca por nombre/slug. ' +
+      '`status` = active | deleted | all (default all). El total respeta el filtro (conteos por pestaña).',
   })
   @ApiResponse({ status: 200, type: AdminProfessionalPageDto })
   @ApiResponse({ status: 403, description: 'Solo admin' })
@@ -99,11 +100,11 @@ export class AdminController {
   }
 
   @ApiOperation({
-    summary:
-      'Listar TODOS los clientes de la plataforma (paginado, con busqueda, incluye eliminados)',
+    summary: 'Listar TODOS los clientes de la plataforma (paginado, busqueda y filtro de estado)',
     description:
       'Listado global (todos los tenants). `id` es el del vinculo professional_client (usalo en ' +
-      'DELETE /admin/clients/:id). `deletedAt` no-null = eliminado. `q` busca por nombre/email/telefono.',
+      'DELETE /admin/clients/:id). `deletedAt` no-null = eliminado. `q` busca por nombre/email/telefono. ' +
+      '`status` = active | deleted | all (default all). El total respeta el filtro (conteos por pestaña).',
   })
   @ApiResponse({ status: 200, type: AdminClientPageDto })
   @ApiResponse({ status: 403, description: 'Solo admin' })
@@ -113,11 +114,11 @@ export class AdminController {
   }
 
   @ApiOperation({
-    summary:
-      'Listar TODOS los comercios de la plataforma (paginado, con busqueda, incluye eliminados)',
+    summary: 'Listar TODOS los comercios de la plataforma (paginado, busqueda y filtro de estado)',
     description:
       'Listado global. Cada item es { comercio, ownerEmail, activeMembers }. ' +
-      '`comercio.deletedAt` no-null = eliminado. `q` busca por nombre/slug.',
+      '`comercio.deletedAt` no-null = eliminado. `q` busca por nombre/slug. ' +
+      '`status` = active | deleted | all (default all). El total respeta el filtro (conteos por pestaña).',
   })
   @ApiResponse({ status: 200, type: AdminComercioPageDto })
   @ApiResponse({ status: 403, description: 'Solo admin' })
