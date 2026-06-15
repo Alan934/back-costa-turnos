@@ -15,6 +15,8 @@ import {
   AvailableSlot,
   CreateScheduleRuleDto,
   CreateTimeOffDto,
+  DayAvailabilityDto,
+  DayAvailabilityStatus,
   UpdateScheduleRuleDto,
 } from './dto/availability.dto';
 
@@ -65,9 +67,7 @@ export class AvailabilityService {
 
   private async withServiceIds(rules: ScheduleRule[]): Promise<ScheduleRule[]> {
     const byRule = await this.serviceIdsByRule(rules.map((r) => r.id));
-    return rules.map((r) =>
-      Object.assign(r, { serviceIds: byRule.get(r.id) ?? [] }),
-    );
+    return rules.map((r) => Object.assign(r, { serviceIds: byRule.get(r.id) ?? [] }));
   }
 
   // ---- Schedule rules POR MEMBRESÍA ----
@@ -89,7 +89,9 @@ export class AvailabilityService {
     }
     const membership = await this.comercios.getMembershipById(membershipId);
     // staff_id legacy: el sillón del comercio-de-uno / del profesional.
-    const staff = await this.staff.findOne({ where: { professionalId: membership.professionalId } });
+    const staff = await this.staff.findOne({
+      where: { professionalId: membership.professionalId },
+    });
     if (!staff) throw new NotFoundException('Staff del profesional no encontrado');
 
     const serviceIds = await this.validateRuleServices(membershipId, dto.serviceIds);
@@ -179,7 +181,9 @@ export class AvailabilityService {
 
   async createTimeOffForMembership(membershipId: string, dto: CreateTimeOffDto): Promise<TimeOff> {
     const membership = await this.comercios.getMembershipById(membershipId);
-    const staff = await this.staff.findOne({ where: { professionalId: membership.professionalId } });
+    const staff = await this.staff.findOne({
+      where: { professionalId: membership.professionalId },
+    });
     if (!staff) throw new NotFoundException('Staff del profesional no encontrado');
     const start = new Date(dto.startAt);
     const end = new Date(dto.endAt);
@@ -215,6 +219,97 @@ export class AvailabilityService {
     from: string,
     to: string,
   ): Promise<AvailableSlot[]> {
+    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to);
+    return this.buildSlots(inputs);
+  }
+
+  /**
+   * Resumen por día (para el chip del front): por cada fecha del rango devuelve si
+   * es reservable y, si no, el motivo (cerrado / vacaciones-bloqueo / completo).
+   * Para `time_off` incluye el `reason` cargado por el profesional.
+   */
+  async computeDayAvailabilityByMembership(
+    membershipId: string,
+    serviceId: string,
+    from: string,
+    to: string,
+  ): Promise<DayAvailabilityDto[]> {
+    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to);
+    const slots = this.buildSlots(inputs);
+
+    // Días con al menos un slot libre.
+    const availableDays = new Set(
+      slots.map((s) => DateTime.fromISO(s.startAt, { zone: inputs.zone }).toISODate()),
+    );
+
+    const days: DayAvailabilityDto[] = [];
+    for (
+      let day = inputs.rangeStart;
+      day <= inputs.rangeEnd;
+      day = day.plus({ days: 1 }).startOf('day')
+    ) {
+      const date = day.toISODate()!;
+      const dow = day.weekday % 7; // 1=lunes..7=domingo -> 0=domingo..6=sabado
+      const hasWork = (inputs.workByDay.get(dow)?.length ?? 0) > 0;
+
+      if (availableDays.has(date)) {
+        days.push({ date, status: DayAvailabilityStatus.Available, reason: null, bookable: true });
+        continue;
+      }
+
+      // Sin slots libres: clasificar el motivo. Un time_off que cubra (parte de)
+      // el día tiene prioridad como explicación visible.
+      const timeOff = this.timeOffCoveringDay(inputs.timeOffs, day);
+      if (timeOff) {
+        days.push({
+          date,
+          status: DayAvailabilityStatus.TimeOff,
+          reason: timeOff.reason,
+          bookable: false,
+        });
+      } else if (!hasWork) {
+        days.push({ date, status: DayAvailabilityStatus.Closed, reason: null, bookable: false });
+      } else {
+        days.push({ date, status: DayAvailabilityStatus.Full, reason: null, bookable: false });
+      }
+    }
+
+    return days;
+  }
+
+  /** Primer time_off que se solapa con el día (en la zona del comercio), o null. */
+  private timeOffCoveringDay(timeOffs: TimeOff[], day: DateTime): TimeOff | null {
+    const dayInterval = Interval.fromDateTimes(day.startOf('day'), day.endOf('day'));
+    return (
+      timeOffs.find((t) =>
+        dayInterval.overlaps(
+          Interval.fromDateTimes(DateTime.fromJSDate(t.startAt), DateTime.fromJSDate(t.endAt)),
+        ),
+      ) ?? null
+    );
+  }
+
+  /**
+   * Carga y prepara todo lo necesario para calcular slots de una membresía+servicio:
+   * reglas por día (filtradas por el servicio), time_off y turnos ocupados del
+   * profesional, y el rango en la zona del comercio.
+   */
+  private async prepareSlotInputs(
+    membershipId: string,
+    serviceId: string,
+    from: string,
+    to: string,
+  ): Promise<{
+    rangeStart: DateTime;
+    rangeEnd: DateTime;
+    zone: string;
+    duration: number;
+    workByDay: Map<number, ScheduleRule[]>;
+    breaksByDay: Map<number, ScheduleRule[]>;
+    timeOffs: TimeOff[];
+    busy: Appointment[];
+    minBookingHours?: number;
+  }> {
     const membership = await this.comercios.getMembershipById(membershipId);
     const comercio = await this.comercios.getComercio(membership.comercioId);
 
@@ -270,16 +365,17 @@ export class AvailabilityService {
       },
     });
 
-    return this.buildSlots({
+    return {
       rangeStart,
       rangeEnd,
+      zone,
       duration,
       workByDay,
       breaksByDay,
       timeOffs,
       busy,
       minBookingHours: membership.minBookingHours,
-    });
+    };
   }
 
   // ---- Núcleo de cálculo de slots (compartido) ----

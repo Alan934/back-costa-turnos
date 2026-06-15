@@ -17,6 +17,7 @@ import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { CatalogService } from '@/modules/catalog/catalog.service';
 import { AvailabilityService } from '@/modules/availability/availability.service';
+import { DayAvailabilityDto } from '@/modules/availability/dto/availability.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 import { AppointmentsService } from './appointments.service';
 import { Appointment } from './entities/appointment.entity';
@@ -111,7 +112,10 @@ export class PublicBookingController {
     @Param('membershipId') membershipId: string,
   ): Promise<PublicProfessionalDetailDto> {
     const comercio = await this.comercios.getComercioBySlug(slug);
-    const membership = await this.comercios.getActiveMembershipInComercio(comercio.id, membershipId);
+    const membership = await this.comercios.getActiveMembershipInComercio(
+      comercio.id,
+      membershipId,
+    );
     const services = await this.catalog.listActiveByMembership(membership.id);
     return {
       ...this.toPublicProfessional(membership, comercio),
@@ -135,6 +139,28 @@ export class PublicBookingController {
     const comercio = await this.comercios.getComercioBySlug(slug);
     await this.comercios.getActiveMembershipInComercio(comercio.id, membershipId);
     return this.availability.computeSlotsByMembership(membershipId, serviceId, from, to);
+  }
+
+  // ---- Disponibilidad por día (motivo del bloqueo para el chip del front) ----
+  @ApiOperation({
+    summary: 'Disponibilidad por día de un profesional (motivo cuando no es reservable)',
+    description:
+      'Por cada fecha del rango devuelve status (available/closed/time_off/full) y, cuando ' +
+      'status=time_off, el motivo cargado por el profesional. Útil para el chip deshabilitado.',
+  })
+  @ApiResponse({ status: 200, type: DayAvailabilityDto, isArray: true })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get('professionals/:membershipId/day-availability')
+  async dayAvailability(
+    @Param('slug') slug: string,
+    @Param('membershipId') membershipId: string,
+    @Query('serviceId') serviceId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ): Promise<DayAvailabilityDto[]> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    await this.comercios.getActiveMembershipInComercio(comercio.id, membershipId);
+    return this.availability.computeDayAvailabilityByMembership(membershipId, serviceId, from, to);
   }
 
   // ---- Reservas (eligiendo profesional por membershipId) ----
@@ -191,6 +217,23 @@ export class PublicBookingController {
     const comercio = await this.comercios.getComercioBySlug(slug);
     const membership = await this.singleMembershipOrThrow(comercio.id);
     return this.availability.computeSlotsByMembership(membership.id, serviceId, from, to);
+  }
+
+  @ApiOperation({
+    summary: 'Disponibilidad por día (comercio-de-uno): auto-resuelve el único profesional',
+    deprecated: true,
+  })
+  @ApiResponse({ status: 200, type: DayAvailabilityDto, isArray: true })
+  @Get('day-availability')
+  async dayAvailabilityFlat(
+    @Param('slug') slug: string,
+    @Query('serviceId') serviceId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ): Promise<DayAvailabilityDto[]> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const membership = await this.singleMembershipOrThrow(comercio.id);
+    return this.availability.computeDayAvailabilityByMembership(membership.id, serviceId, from, to);
   }
 
   @ApiOperation({

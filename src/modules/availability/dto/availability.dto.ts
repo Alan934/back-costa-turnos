@@ -137,3 +137,41 @@ export interface AvailableSlot {
   startAt: string;
   endAt: string;
 }
+
+/** Por qué un día no admite reservas (para el chip deshabilitado en el front). */
+export enum DayAvailabilityStatus {
+  /** Hay al menos un slot libre ese día. */
+  Available = 'available',
+  /** No hay horario de atención ese día de la semana (no hay reglas de trabajo). */
+  Closed = 'closed',
+  /** El profesional bloqueó ese día (vacaciones/feriado/bloqueo manual). */
+  TimeOff = 'time_off',
+  /** Hay horario de atención pero está completo (turnos/descansos lo ocupan). */
+  Full = 'full',
+}
+
+/** Estado de disponibilidad de un día concreto, para mostrar el motivo al cliente. */
+export class DayAvailabilityDto {
+  @ApiProperty({
+    example: '2026-07-01',
+    description: 'Fecha (YYYY-MM-DD) en la zona del comercio.',
+  })
+  date!: string;
+
+  @ApiProperty({ enum: DayAvailabilityStatus, enumName: 'DayAvailabilityStatus' })
+  status!: DayAvailabilityStatus;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Motivo del bloqueo cuando status=time_off (texto cargado por el profesional). null en otros casos.',
+  })
+  reason!: string | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'true si hay al menos un slot libre (status=available).',
+  })
+  bookable!: boolean;
+}
