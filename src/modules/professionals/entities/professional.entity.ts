@@ -57,6 +57,11 @@ export class Professional extends BaseEntity {
   @Column({ name: 'cancellation_window_hours', type: 'integer', default: 24 })
   cancellationWindowHours!: number;
 
+  /** Horas mínimas antes del turno hasta las que el cliente puede reprogramarlo. 0 = sin restricción. */
+  @ApiProperty({ type: Number })
+  @Column({ name: 'reschedule_window_hours', type: 'integer', default: 24 })
+  rescheduleWindowHours!: number;
+
   @ApiProperty({ type: 'object', additionalProperties: true })
   @Column({ name: 'public_page_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
   publicPageSettings!: PublicPageSettings;

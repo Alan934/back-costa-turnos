@@ -1,8 +1,18 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
 import { DepositMode } from '@/common/enums';
 import { IsEnum } from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
+import type { PublicPageSettings } from '../entities/professional.entity';
 
 export class OnboardProfessionalDto {
   @ApiProperty({ example: 'Peluqueria Mi Pueblo' })
@@ -56,6 +66,26 @@ export class UpdateProfessionalDto {
   @IsInt()
   @Min(0)
   cancellationWindowHours?: number;
+
+  @ApiPropertyOptional({
+    example: 24,
+    description:
+      'Horas mínimas antes del turno hasta las que el cliente puede reprogramar. 0 = sin restricción.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  rescheduleWindowHours?: number;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description:
+      'Branding de la página pública (logoFileId, primaryColor, description, bio, phone, etc.). Se reemplaza completo.',
+  })
+  @IsOptional()
+  @IsObject()
+  publicPageSettings?: PublicPageSettings;
 }
 
 export class CreateStaffDto {

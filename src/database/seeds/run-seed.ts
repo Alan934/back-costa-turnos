@@ -114,6 +114,7 @@ async function seed(): Promise<void> {
         slug: 'mi-peluqueria',
         timezone: 'America/Argentina/Buenos_Aires',
         cancellationWindowHours: 24,
+        rescheduleWindowHours: 24,
       }),
     );
 
@@ -318,7 +319,9 @@ async function seed(): Promise<void> {
         isPersonal: false,
       }),
     );
-    console.log(`Comercial creado: ${comercialEmail} / comercial12345 (comercio: Peluquería Centro)`);
+    console.log(
+      `Comercial creado: ${comercialEmail} / comercial12345 (comercio: Peluquería Centro)`,
+    );
   }
 
   // Membresía del profesional demo en Centro + sus servicios/horario en ese comercio.
@@ -363,10 +366,15 @@ async function seed(): Promise<void> {
         slug: 'marta-estilista',
         timezone: 'America/Argentina/Buenos_Aires',
         cancellationWindowHours: 24,
+        rescheduleWindowHours: 24,
       }),
     );
     await manager.save(
-      manager.create(Person, { accountId: martaAccount.id, fullName: 'Marta Estilista', email: martaEmail }),
+      manager.create(Person, {
+        accountId: martaAccount.id,
+        fullName: 'Marta Estilista',
+        email: martaEmail,
+      }),
     );
     // Comercio-de-uno + suscripción trial de Marta.
     const martaComercio = await manager.save(

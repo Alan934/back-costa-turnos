@@ -67,6 +67,16 @@ export class SmtpEmailSender implements NotificationSender {
           subject: 'Estado de tu suscripción',
           text: 'Hay novedades sobre el estado de tu suscripción. Ingresá para revisarlas.',
         };
+      case NotificationType.Rescheduled: {
+        const who = str(p.clientName) || 'Un cliente';
+        const oldAt = str(p.oldStartAt);
+        const newAt = str(p.newStartAt);
+        const fromTo = oldAt && newAt ? ` Cambió del ${oldAt} al ${newAt}.` : '';
+        return {
+          subject: 'Un cliente reprogramó su turno',
+          text: `${who} reprogramó su turno.${fromTo} Ingresá para ver tu agenda.`,
+        };
+      }
       default:
         return {
           subject: 'Notificación de Turnerito',
@@ -74,4 +84,9 @@ export class SmtpEmailSender implements NotificationSender {
         };
     }
   }
+}
+
+/** Normaliza un valor de payload (unknown) a string; vacío si no es primitivo. */
+function str(v: unknown): string {
+  return typeof v === 'string' || typeof v === 'number' ? String(v) : '';
 }

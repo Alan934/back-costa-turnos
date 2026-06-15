@@ -148,6 +148,7 @@ export enum NotificationType {
   Bumped = 'bumped',
   Deposit = 'deposit',
   Subscription = 'subscription',
+  Rescheduled = 'rescheduled',
 }
 
 export enum NotificationStatus {

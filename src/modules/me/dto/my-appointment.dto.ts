@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsISO8601 } from 'class-validator';
 import { AppointmentStatus } from '@/common/enums';
+
+export class RescheduleMyAppointmentDto {
+  @ApiProperty({ example: '2026-06-10T13:00:00Z', description: 'Nuevo inicio del turno' })
+  @IsISO8601()
+  startAt!: string;
+}
 
 export class MyAppointmentBusinessDto {
   @ApiProperty()
@@ -10,6 +17,8 @@ export class MyAppointmentBusinessDto {
   address!: string | null;
   @ApiProperty({ type: Number })
   cancellationWindowHours!: number;
+  @ApiProperty({ type: Number })
+  rescheduleWindowHours!: number;
 }
 
 export class MyAppointmentDto {

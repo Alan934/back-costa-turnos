@@ -6,15 +6,28 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { AppointmentStatus, CancellationReason } from '@/common/enums';
+import {
+  AppointmentStatus,
+  CancellationReason,
+  NotificationChannel,
+  NotificationType,
+} from '@/common/enums';
+import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
-import { MyAppointmentDto } from './dto/my-appointment.dto';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { MyAppointmentDto, RescheduleMyAppointmentDto } from './dto/my-appointment.dto';
 
 const TERMINAL = [AppointmentStatus.Done, AppointmentStatus.Cancelled, AppointmentStatus.NoShow];
+/** Estados que ocupan un horario en la agenda del profesional (para el chequeo de solape). */
+const ACTIVE_STATUSES = [
+  AppointmentStatus.Requested,
+  AppointmentStatus.Confirmed,
+  AppointmentStatus.InProgress,
+];
 
 @Injectable()
 export class MeService {
@@ -29,6 +42,9 @@ export class MeService {
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Person)
     private readonly persons: Repository<Person>,
+    @InjectRepository(Membership)
+    private readonly memberships: Repository<Membership>,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Todos los turnos del cliente autenticado, en todos los negocios (cross-tenant). */
@@ -71,6 +87,84 @@ export class MeService {
     appt.status = AppointmentStatus.Cancelled;
     appt.cancellationReason = CancellationReason.Client;
     await this.appointments.save(appt);
+
+    const maps = await this.loadRefs([appt]);
+    return this.toDto(appt, maps);
+  }
+
+  /** Reprograma un turno propio a un nuevo horario si esta dentro de la ventana de reprogramacion. */
+  async rescheduleMyAppointment(
+    accountId: string,
+    appointmentId: string,
+    dto: RescheduleMyAppointmentDto,
+  ): Promise<MyAppointmentDto> {
+    const person = await this.persons.findOne({ where: { accountId } });
+    if (!person) throw new NotFoundException('Cliente no encontrado');
+
+    const appt = await this.appointments.findOne({
+      where: { id: appointmentId, personId: person.id },
+    });
+    if (!appt) throw new NotFoundException('Turno no encontrado');
+    if (TERMINAL.includes(appt.status)) {
+      throw new BadRequestException('El turno no se puede reprogramar en su estado actual');
+    }
+
+    const professional = await this.professionals.findOne({ where: { id: appt.professionalId } });
+    const windowHours = professional?.rescheduleWindowHours ?? 0;
+    const deadline = appt.startAt.getTime() - windowHours * 3_600_000;
+    if (Date.now() > deadline) {
+      throw new ConflictException(
+        `Solo se puede reprogramar hasta ${windowHours}h antes del turno. Contactá al negocio.`,
+      );
+    }
+
+    const service = await this.services.findOne({ where: { id: appt.serviceId } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+
+    const newStart = new Date(dto.startAt);
+    const newEnd = new Date(newStart.getTime() + service.durationMinutes * 60_000);
+
+    // Anticipación mínima del comercio: el nuevo horario respeta el mismo lead time que una reserva.
+    const membership = await this.memberships.findOne({ where: { id: appt.membershipId } });
+    const minBookingHours = membership?.minBookingHours ?? 0;
+    const earliest = Date.now() + minBookingHours * 3_600_000;
+    if (newStart.getTime() < earliest) {
+      throw new BadRequestException(
+        minBookingHours > 0
+          ? `El turno debe reprogramarse con al menos ${minBookingHours}h de anticipación`
+          : 'No se puede reprogramar a un horario en el pasado',
+      );
+    }
+
+    // Solape en la agenda del profesional (excluye el propio turno que se está moviendo).
+    const conflicts = await this.appointments
+      .createQueryBuilder('a')
+      .where('a.professional_id = :professionalId', { professionalId: appt.professionalId })
+      .andWhere('a.id != :id', { id: appt.id })
+      .andWhere('a.status IN (:...statuses)', { statuses: ACTIVE_STATUSES })
+      .andWhere('a.start_at < :end AND a.end_at > :start', { start: newStart, end: newEnd })
+      .getCount();
+    if (conflicts > 0) {
+      throw new ConflictException('El nuevo horario se solapa con otro turno');
+    }
+
+    const oldStartAt = appt.startAt.toISOString();
+    appt.startAt = newStart;
+    appt.endAt = newEnd;
+    await this.appointments.save(appt);
+
+    // Avisa al profesional por correo que el cliente movió el turno.
+    await this.notifications.enqueue({
+      professionalId: appt.professionalId,
+      channel: NotificationChannel.Email,
+      type: NotificationType.Rescheduled,
+      payload: {
+        appointmentId: appt.id,
+        clientName: person.fullName,
+        oldStartAt,
+        newStartAt: appt.startAt.toISOString(),
+      },
+    });
 
     const maps = await this.loadRefs([appt]);
     return this.toDto(appt, maps);
@@ -124,6 +218,7 @@ export class MeService {
         slug: professional?.slug ?? '',
         address: professional?.address ?? null,
         cancellationWindowHours: professional?.cancellationWindowHours ?? 0,
+        rescheduleWindowHours: professional?.rescheduleWindowHours ?? 0,
       },
     };
   }
