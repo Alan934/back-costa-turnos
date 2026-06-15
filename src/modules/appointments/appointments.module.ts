@@ -9,6 +9,7 @@ import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.modul
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
+import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { Appointment } from './entities/appointment.entity';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentsController } from './appointments.controller';
@@ -17,7 +18,7 @@ import { WaitingRoomGateway } from './waiting-room.gateway';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Appointment, Service, Staff, Payment]),
+    TypeOrmModule.forFeature([Appointment, Service, Staff, Payment, ProfessionalClient]),
     IdentityModule,
     CatalogModule,
     ProfessionalsModule,

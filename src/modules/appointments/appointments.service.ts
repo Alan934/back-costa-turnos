@@ -16,6 +16,7 @@ import {
   PaymentOption,
   PaymentStatus,
   PaymentType,
+  ProfessionalClientStatus,
 } from '@/common/enums';
 import { TenantContextService } from '@/common/context/tenant-context.service';
 import { PersonsService } from '@/modules/identity/persons.service';
@@ -23,6 +24,7 @@ import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
+import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { Appointment } from './entities/appointment.entity';
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
@@ -46,6 +48,8 @@ export class AppointmentsService {
     private readonly payments: Repository<Payment>,
     @InjectRepository(Staff)
     private readonly staff: Repository<Staff>,
+    @InjectRepository(ProfessionalClient)
+    private readonly professionalClients: Repository<ProfessionalClient>,
     private readonly persons: PersonsService,
     private readonly tenantContext: TenantContextService,
     private readonly notifications: NotificationsService,
@@ -131,6 +135,27 @@ export class AppointmentsService {
     return person.id;
   }
 
+  /**
+   * Garantiza el vínculo professional_client (la "membresía" cliente↔profesional)
+   * para que la persona aparezca en Clientes tras reservar. Idempotente: si ya
+   * existe no hace nada y no pisa el status (no "desarchiva"). Acepta un manager
+   * opcional para correr dentro de la transacción de la reserva con seña.
+   */
+  private async ensureProfessionalClient(
+    professionalId: string,
+    personId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager ? manager.getRepository(ProfessionalClient) : this.professionalClients;
+    await repo
+      .createQueryBuilder()
+      .insert()
+      .into(ProfessionalClient)
+      .values({ professionalId, personId, status: ProfessionalClientStatus.Active })
+      .orIgnore() // respeta uq_professional_client(professional_id, person_id)
+      .execute();
+  }
+
   private async loadService(tenantId: string, serviceId: string): Promise<Service> {
     const service = await this.services.findOne({
       where: { id: serviceId, professionalId: tenantId, isActive: true },
@@ -207,7 +232,9 @@ export class AppointmentsService {
       isProvisional: hasPaidOption,
       createdVia,
     });
-    return this.appointments.save(appointment);
+    const saved = await this.appointments.save(appointment);
+    await this.ensureProfessionalClient(tenantId, personId);
+    return saved;
   }
 
   /**
@@ -295,6 +322,8 @@ export class AppointmentsService {
         }),
       );
 
+      await this.ensureProfessionalClient(tenantId, personId, manager);
+
       const isCash = dto.method === PaymentMethod.Cash;
       const payment = await manager.save(
         manager.create(Payment, {
@@ -338,8 +367,8 @@ export class AppointmentsService {
     });
     if (appts.length === 0) return appts;
 
-    // Embebe nombre de cliente y servicio (campos derivados) para que el front
-    // muestre nombres reales sin resolver cada relacion por su cuenta.
+    // Embebe datos del cliente (nombre/telefono/email) y del servicio (campos
+    // derivados) para que el front los muestre sin resolver cada relacion aparte.
     const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
     const personIds = [...new Set(appts.map((a) => a.personId))];
     const [services, persons] = await Promise.all([
@@ -347,11 +376,14 @@ export class AppointmentsService {
       this.persons.findByIds(personIds),
     ]);
     const serviceNameById = new Map(services.map((s) => [s.id, s.name]));
-    const personNameById = new Map(persons.map((p) => [p.id, p.fullName]));
+    const personById = new Map(persons.map((p) => [p.id, p]));
 
     for (const a of appts) {
       a.serviceName = serviceNameById.get(a.serviceId) ?? 'Servicio';
-      a.personName = personNameById.get(a.personId) ?? '';
+      const person = personById.get(a.personId);
+      a.personName = person?.fullName ?? '';
+      a.personPhone = person?.phone ?? null;
+      a.personEmail = person?.email ?? null;
     }
     return appts;
   }
