@@ -6,11 +6,10 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AdminGuard } from '@/common/guards/admin.guard';
@@ -29,10 +28,17 @@ import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { CreateComercialDto } from '@/modules/comercios/dto/comercio.dto';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { AuthenticatedRequest } from '@/common/types/request-user';
+import { PaginationQueryDto } from '@/common/dto/paginated.dto';
 import { AdminMetricsService } from './admin-metrics.service';
 import { AdminMetricsDto } from './dto/admin-metrics.dto';
 import { AdminCreateClientDto, AdminCreateProfessionalDto } from './dto/admin-manage.dto';
 import { AdminDeletionService } from './admin-deletion.service';
+import { AdminListService } from './admin-list.service';
+import {
+  AdminClientPageDto,
+  AdminComercioPageDto,
+  AdminProfessionalPageDto,
+} from './dto/admin-list.dto';
 
 /**
  * Endpoints de administracion de la plataforma (solo platform admin).
@@ -51,10 +57,7 @@ export class AdminController {
     private readonly clients: ClientsService,
     private readonly comercios: ComerciosService,
     private readonly deletion: AdminDeletionService,
-    @InjectRepository(Professional)
-    private readonly professionals: Repository<Professional>,
-    @InjectRepository(Subscription)
-    private readonly subs: Repository<Subscription>,
+    private readonly lists: AdminListService,
   ) {}
 
   private clientIp(req: AuthenticatedRequest): string | null {
@@ -83,25 +86,44 @@ export class AdminController {
   }
 
   @ApiOperation({
-    summary: 'Listar profesionales con su suscripcion (incluye los eliminados)',
+    summary: 'Listar profesionales (paginado, con busqueda, incluye eliminados)',
     description:
-      'Incluye profesionales soft-borrados: cada uno trae `professional.deletedAt` (null = activo) para que el front los marque.',
+      'Devuelve { items, total, page, pageSize }. Cada item es { professional, subscription }. ' +
+      '`professional.deletedAt` (null = activo) marca los eliminados. `q` busca por nombre/slug.',
   })
-  @ApiResponse({ status: 200, description: 'Array de { professional, subscription }' })
+  @ApiResponse({ status: 200, type: AdminProfessionalPageDto })
   @ApiResponse({ status: 403, description: 'Solo admin' })
   @Get('professionals')
-  async listProfessionals(): Promise<
-    Array<{ professional: Professional; subscription: Subscription | null }>
-  > {
-    const [professionals, subscriptions] = await Promise.all([
-      this.professionals.find({ order: { createdAt: 'DESC' }, withDeleted: true }),
-      this.subs.find(),
-    ]);
-    const byTenant = new Map(subscriptions.map((s) => [s.professionalId, s]));
-    return professionals.map((professional) => ({
-      professional,
-      subscription: byTenant.get(professional.id) ?? null,
-    }));
+  listProfessionals(@Query() query: PaginationQueryDto): Promise<AdminProfessionalPageDto> {
+    return this.lists.listProfessionals(query);
+  }
+
+  @ApiOperation({
+    summary:
+      'Listar TODOS los clientes de la plataforma (paginado, con busqueda, incluye eliminados)',
+    description:
+      'Listado global (todos los tenants). `id` es el del vinculo professional_client (usalo en ' +
+      'DELETE /admin/clients/:id). `deletedAt` no-null = eliminado. `q` busca por nombre/email/telefono.',
+  })
+  @ApiResponse({ status: 200, type: AdminClientPageDto })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @Get('clients')
+  listClients(@Query() query: PaginationQueryDto): Promise<AdminClientPageDto> {
+    return this.lists.listClients(query);
+  }
+
+  @ApiOperation({
+    summary:
+      'Listar TODOS los comercios de la plataforma (paginado, con busqueda, incluye eliminados)',
+    description:
+      'Listado global. Cada item es { comercio, ownerEmail, activeMembers }. ' +
+      '`comercio.deletedAt` no-null = eliminado. `q` busca por nombre/slug.',
+  })
+  @ApiResponse({ status: 200, type: AdminComercioPageDto })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @Get('comercios')
+  listComercios(@Query() query: PaginationQueryDto): Promise<AdminComercioPageDto> {
+    return this.lists.listComercios(query);
   }
 
   @ApiOperation({
