@@ -27,6 +27,7 @@ export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
   private readonly cfg: SubscriptionConfig;
   private readonly appUrl: string;
+  private readonly frontUrl: string;
 
   constructor(
     @InjectRepository(Subscription)
@@ -43,7 +44,9 @@ export class SubscriptionsService {
     config: ConfigService,
   ) {
     this.cfg = config.getOrThrow<SubscriptionConfig>('subscription');
-    this.appUrl = config.getOrThrow<AppConfig>('app').appUrl;
+    const app = config.getOrThrow<AppConfig>('app');
+    this.appUrl = app.appUrl;
+    this.frontUrl = app.frontUrl;
   }
 
   async getByTenant(tenantId: string): Promise<Subscription> {
@@ -88,7 +91,7 @@ export class SubscriptionsService {
       description: 'Suscripcion mensual Turnerito',
       amountCents: sub.amountCents,
       payerEmail: account?.email ?? null,
-      backUrl: this.appUrl,
+      backUrl: this.frontUrl,
       notificationUrl: `${this.appUrl.replace(/\/$/, '')}/v1/subscription/mp/webhook`,
     });
     return { initPoint: pref.initPoint };
