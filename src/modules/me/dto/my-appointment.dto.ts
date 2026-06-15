@@ -32,6 +32,18 @@ export class MyAppointmentDto {
   status!: AppointmentStatus;
   @ApiProperty({ type: Boolean })
   isProvisional!: boolean;
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Servicio del turno (para consultar slots al reprogramar)',
+  })
+  serviceId!: string;
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Membresía profesional-en-comercio donde ocurre el turno',
+  })
+  membershipId!: string;
+  @ApiProperty({ format: 'uuid', description: 'Profesional dueño de la agenda' })
+  professionalId!: string;
   @ApiProperty()
   serviceName!: string;
   @ApiProperty({ type: Number })
