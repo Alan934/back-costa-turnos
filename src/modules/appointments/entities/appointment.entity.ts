@@ -121,4 +121,15 @@ export class Appointment extends BaseEntity {
     default: CreatedVia.ClientSelf,
   })
   createdVia!: CreatedVia;
+
+  /**
+   * Campos derivados (no persistidos): nombre del cliente y del servicio del
+   * turno. Se completan en los listados para que el front muestre nombres reales
+   * sin tener que resolver cada relacion por separado.
+   */
+  @ApiPropertyOptional({ description: 'Nombre del cliente del turno' })
+  personName?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre del servicio del turno' })
+  serviceName?: string;
 }

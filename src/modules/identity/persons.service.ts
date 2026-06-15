@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Person } from './entities/person.entity';
 
 interface FindOrCreatePersonInput {
@@ -23,6 +23,12 @@ export class PersonsService {
 
   findByAccountId(accountId: string): Promise<Person | null> {
     return this.persons.findOne({ where: { accountId } });
+  }
+
+  /** Lookup en lote de personas por id (para embeber nombres en listados). */
+  findByIds(ids: string[]): Promise<Person[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.persons.find({ where: { id: In(ids) } });
   }
 
   /**

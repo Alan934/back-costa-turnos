@@ -330,12 +330,30 @@ export class AppointmentsService {
     return appointment;
   }
 
-  list(tenantId: string, staffId?: string): Promise<Appointment[]> {
-    return this.appointments.find({
+  async list(tenantId: string, staffId?: string): Promise<Appointment[]> {
+    const appts = await this.appointments.find({
       where: { professionalId: tenantId, ...(staffId ? { staffId } : {}) },
       order: { startAt: 'ASC' },
       take: 500,
     });
+    if (appts.length === 0) return appts;
+
+    // Embebe nombre de cliente y servicio (campos derivados) para que el front
+    // muestre nombres reales sin resolver cada relacion por su cuenta.
+    const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
+    const personIds = [...new Set(appts.map((a) => a.personId))];
+    const [services, persons] = await Promise.all([
+      this.services.find({ where: { id: In(serviceIds) } }),
+      this.persons.findByIds(personIds),
+    ]);
+    const serviceNameById = new Map(services.map((s) => [s.id, s.name]));
+    const personNameById = new Map(persons.map((p) => [p.id, p.fullName]));
+
+    for (const a of appts) {
+      a.serviceName = serviceNameById.get(a.serviceId) ?? 'Servicio';
+      a.personName = personNameById.get(a.personId) ?? '';
+    }
+    return appts;
   }
 
   // ---- Transiciones de estado ----
