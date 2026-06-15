@@ -25,7 +25,7 @@ export class MercadoPagoProvider implements PaymentProvider {
   constructor(private readonly config: ConfigService) {
     this.mp = config.getOrThrow<MpConfig>('mercadopago');
     const app = config.getOrThrow<AppConfig>('app');
-    this.notificationUrl = `${app.appUrl.replace(/\/$/, '')}/payments/mp/webhook`;
+    this.notificationUrl = `${app.appUrl.replace(/\/$/, '')}/v1/payments/mp/webhook`;
   }
 
   isConfigured(): boolean {
