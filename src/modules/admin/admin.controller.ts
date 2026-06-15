@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -17,9 +27,12 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { CreateComercialDto } from '@/modules/comercios/dto/comercio.dto';
+import { CurrentAccount } from '@/common/decorators/current-account.decorator';
+import { AuthenticatedRequest } from '@/common/types/request-user';
 import { AdminMetricsService } from './admin-metrics.service';
 import { AdminMetricsDto } from './dto/admin-metrics.dto';
 import { AdminCreateClientDto, AdminCreateProfessionalDto } from './dto/admin-manage.dto';
+import { AdminDeletionService } from './admin-deletion.service';
 
 /**
  * Endpoints de administracion de la plataforma (solo platform admin).
@@ -37,11 +50,16 @@ export class AdminController {
     private readonly professionalsService: ProfessionalsService,
     private readonly clients: ClientsService,
     private readonly comercios: ComerciosService,
+    private readonly deletion: AdminDeletionService,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Subscription)
     private readonly subs: Repository<Subscription>,
   ) {}
+
+  private clientIp(req: AuthenticatedRequest): string | null {
+    return req.ip ?? null;
+  }
 
   // ---- Comercios (solo admin crea cuentas comerciales) ----
   @ApiOperation({
@@ -64,7 +82,11 @@ export class AdminController {
     return this.adminMetrics.getMetrics();
   }
 
-  @ApiOperation({ summary: 'Listar profesionales con su suscripcion' })
+  @ApiOperation({
+    summary: 'Listar profesionales con su suscripcion (incluye los eliminados)',
+    description:
+      'Incluye profesionales soft-borrados: cada uno trae `professional.deletedAt` (null = activo) para que el front los marque.',
+  })
   @ApiResponse({ status: 200, description: 'Array de { professional, subscription }' })
   @ApiResponse({ status: 403, description: 'Solo admin' })
   @Get('professionals')
@@ -72,7 +94,7 @@ export class AdminController {
     Array<{ professional: Professional; subscription: Subscription | null }>
   > {
     const [professionals, subscriptions] = await Promise.all([
-      this.professionals.find({ order: { createdAt: 'DESC' } }),
+      this.professionals.find({ order: { createdAt: 'DESC' }, withDeleted: true }),
       this.subs.find(),
     ]);
     const byTenant = new Map(subscriptions.map((s) => [s.professionalId, s]));
@@ -146,5 +168,105 @@ export class AdminController {
   @Post('accounts/:accountId/activate')
   activateAccount(@Param('accountId') accountId: string): Promise<Account> {
     return this.accounts.setStatus(accountId, AccountStatus.Active);
+  }
+
+  // ---- Eliminacion logica (soft-delete) de actores ----
+  // El borrado es LOGICO: marca deleted_at, conserva el historial (turnos/pagos),
+  // bloquea la cuenta del actor y queda auditado. Restaurable con /restore.
+
+  @ApiOperation({
+    summary: 'Eliminar (logico) un profesional y su agenda; bloquea su cuenta',
+    description:
+      'Soft-borra el professional y sus membresias/servicios/horarios/clientes/staff. ' +
+      'NO borra turnos ni pagos (historial). Bloquea la cuenta y revoca su sesion.',
+  })
+  @ApiResponse({ status: 204, description: 'Eliminado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Professional no encontrado' })
+  @Delete('professionals/:id')
+  @HttpCode(204)
+  async deleteProfessional(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.deleteProfessional(id, adminAccountId, this.clientIp(req));
+  }
+
+  @ApiOperation({ summary: 'Restaurar un profesional eliminado (y reactivar su cuenta)' })
+  @ApiResponse({ status: 204, description: 'Restaurado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Professional no encontrado' })
+  @Post('professionals/:id/restore')
+  @HttpCode(204)
+  async restoreProfessional(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.restoreProfessional(id, adminAccountId, this.clientIp(req));
+  }
+
+  @ApiOperation({
+    summary: 'Eliminar (logico) un comercio y sus membresias; bloquea su cuenta comercial',
+  })
+  @ApiResponse({ status: 204, description: 'Eliminado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Comercio no encontrado' })
+  @Delete('comercios/:id')
+  @HttpCode(204)
+  async deleteComercio(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.deleteComercio(id, adminAccountId, this.clientIp(req));
+  }
+
+  @ApiOperation({ summary: 'Restaurar un comercio eliminado (y reactivar su cuenta)' })
+  @ApiResponse({ status: 204, description: 'Restaurado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Comercio no encontrado' })
+  @Post('comercios/:id/restore')
+  @HttpCode(204)
+  async restoreComercio(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.restoreComercio(id, adminAccountId, this.clientIp(req));
+  }
+
+  @ApiOperation({
+    summary: 'Eliminar (logico) un cliente (vinculo professional_client)',
+    description:
+      'Soft-borra el vinculo cliente-profesional. Si a la persona no le queda ningun ' +
+      'otro vinculo activo, tambien se borra la persona global y se bloquea su cuenta.',
+  })
+  @ApiResponse({ status: 204, description: 'Eliminado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Cliente no encontrado' })
+  @Delete('clients/:id')
+  @HttpCode(204)
+  async deleteClient(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.deleteClient(id, adminAccountId, this.clientIp(req));
+  }
+
+  @ApiOperation({ summary: 'Restaurar un cliente eliminado (y la persona si aplica)' })
+  @ApiResponse({ status: 204, description: 'Restaurado' })
+  @ApiResponse({ status: 403, description: 'Solo admin' })
+  @ApiResponse({ status: 404, description: 'Cliente no encontrado' })
+  @Post('clients/:id/restore')
+  @HttpCode(204)
+  async restoreClient(
+    @Param('id') id: string,
+    @CurrentAccount('sub') adminAccountId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.deletion.restoreClient(id, adminAccountId, this.clientIp(req));
   }
 }
