@@ -56,6 +56,10 @@ export class PublicProfessionalDetailDto extends PublicProfessionalDto {
   @ApiProperty()
   timezone!: string;
 
-  @ApiProperty({ type: Service, isArray: true, description: 'Servicios activos del profesional en este comercio.' })
+  @ApiProperty({
+    type: Service,
+    isArray: true,
+    description: 'Servicios activos del profesional en este comercio.',
+  })
   services!: Service[];
 }

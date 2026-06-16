@@ -6,6 +6,7 @@ import { ProfessionalsModule } from '@/modules/professionals/professionals.modul
 import { AvailabilityModule } from '@/modules/availability/availability.module';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.module';
+import { PaymentsModule } from '@/modules/payments/payments.module';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
@@ -25,6 +26,7 @@ import { WaitingRoomGateway } from './waiting-room.gateway';
     AvailabilityModule,
     NotificationsModule,
     SubscriptionsModule,
+    PaymentsModule,
   ],
   controllers: [AppointmentsController, PublicBookingController],
   providers: [AppointmentsService, WaitingRoomGateway],

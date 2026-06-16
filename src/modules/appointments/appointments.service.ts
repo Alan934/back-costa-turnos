@@ -27,6 +27,7 @@ import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
+import { PaymentsService } from '@/modules/payments/payments.service';
 import { Appointment } from './entities/appointment.entity';
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
 import { QueueUpdatePayload, WaitingRoomGateway } from './waiting-room.gateway';
@@ -56,6 +57,7 @@ export class AppointmentsService {
     private readonly notifications: NotificationsService,
     private readonly waitingRoom: WaitingRoomGateway,
     private readonly comercios: ComerciosService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   /**
@@ -86,8 +88,13 @@ export class AppointmentsService {
   /** Reserva pública con seña/pago completo en un comercio, eligiendo al profesional. */
   async bookWithDepositForMembership(
     membershipId: string,
-    dto: { serviceId: string; startAt: string; method: PaymentMethod; paymentOption?: PaymentOption } & ClientRefDto,
-  ): Promise<{ appointment: Appointment; payment: Payment }> {
+    dto: {
+      serviceId: string;
+      startAt: string;
+      method: PaymentMethod;
+      paymentOption?: PaymentOption;
+    } & ClientRefDto,
+  ): Promise<{ appointment: Appointment; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
     return this.bookWithDeposit(professionalId, { ...dto, staffId });
   }
@@ -249,9 +256,20 @@ export class AppointmentsService {
   async bookWithDeposit(
     tenantId: string,
     dto: BookWithDepositDto,
-  ): Promise<{ appointment: Appointment; payment: Payment }> {
+  ): Promise<{ appointment: Appointment; payment: Payment; mpInitPoint?: string }> {
     const service = await this.loadService(tenantId, dto.serviceId);
     const option = dto.paymentOption ?? PaymentOption.Deposit;
+
+    // El front ya lo bloquea por UX, pero el back rechaza igual: cobrar online
+    // exige que el profesional tenga su MercadoPago conectado.
+    if (
+      dto.method === PaymentMethod.MercadoPago &&
+      !(await this.comercios.hasMpConnected(tenantId))
+    ) {
+      throw new BadRequestException(
+        'El profesional no tiene MercadoPago conectado: no puede cobrar online.',
+      );
+    }
 
     // Resuelve monto y tipo según la opción elegida (seña o pago completo).
     let amountCents: number;
@@ -280,77 +298,94 @@ export class AppointmentsService {
     this.assertLeadTime(startAt, minBookingHours);
     const personId = await this.resolvePersonId(dto);
 
-    return this.tenantContext.runWithTenant(tenantId, async (manager) => {
-      // Mutex: serializa las reservas de seña de este PROFESIONAL (su agenda es
-      // única en todos sus comercios, no puede estar en dos lugares a la vez).
-      // Advisory lock por transacción (se libera al COMMIT/ROLLBACK): no toma row
-      // lock sobre `professional` (tabla referenciada por payments/notifications),
-      // evitando contención con esos INSERT.
-      await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [tenantId]);
+    const { appointment, payment } = await this.tenantContext.runWithTenant(
+      tenantId,
+      async (manager) => {
+        // Mutex: serializa las reservas de seña de este PROFESIONAL (su agenda es
+        // única en todos sus comercios, no puede estar en dos lugares a la vez).
+        // Advisory lock por transacción (se libera al COMMIT/ROLLBACK): no toma row
+        // lock sobre `professional` (tabla referenciada por payments/notifications),
+        // evitando contención con esos INSERT.
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [tenantId]);
 
-      const conflicts = await this.overlapping(manager, tenantId, startAt, endAt);
+        const conflicts = await this.overlapping(manager, tenantId, startAt, endAt);
 
-      const firmConflict = conflicts.find((a) => !a.isProvisional);
-      if (firmConflict) {
-        throw new ConflictException('El horario ya esta tomado');
-      }
+        const firmConflict = conflicts.find((a) => !a.isProvisional);
+        if (firmConflict) {
+          throw new ConflictException('El horario ya esta tomado');
+        }
 
-      // Desplaza provisionales que ocupan el horario.
-      for (const prov of conflicts.filter((a) => a.isProvisional)) {
-        prov.status = AppointmentStatus.Cancelled;
-        prov.cancellationReason = CancellationReason.Bumped;
-        await manager.save(prov);
+        // Desplaza provisionales que ocupan el horario.
+        for (const prov of conflicts.filter((a) => a.isProvisional)) {
+          prov.status = AppointmentStatus.Cancelled;
+          prov.cancellationReason = CancellationReason.Bumped;
+          await manager.save(prov);
+          await this.notifications.enqueue({
+            professionalId: tenantId,
+            personId: prov.personId,
+            channel: NotificationChannel.Email,
+            type: NotificationType.Bumped,
+            payload: { appointmentId: prov.id, startAt: prov.startAt.toISOString() },
+          });
+        }
+
+        const appointment = await manager.save(
+          manager.create(Appointment, {
+            professionalId: tenantId,
+            comercioId,
+            membershipId,
+            staffId: dto.staffId,
+            personId,
+            serviceId: service.id,
+            startAt,
+            endAt,
+            status: AppointmentStatus.Confirmed,
+            isProvisional: false,
+            createdVia: CreatedVia.ClientSelf,
+          }),
+        );
+
+        await this.ensureProfessionalClient(tenantId, personId, manager);
+
+        const isCash = dto.method === PaymentMethod.Cash;
+        const payment = await manager.save(
+          manager.create(Payment, {
+            professionalId: tenantId,
+            appointmentId: appointment.id,
+            personId,
+            type: paymentType,
+            amountCents,
+            method: dto.method,
+            status: isCash ? PaymentStatus.Paid : PaymentStatus.Pending,
+            paidAt: isCash ? new Date() : null,
+          }),
+        );
+
         await this.notifications.enqueue({
           professionalId: tenantId,
-          personId: prov.personId,
+          personId,
           channel: NotificationChannel.Email,
-          type: NotificationType.Bumped,
-          payload: { appointmentId: prov.id, startAt: prov.startAt.toISOString() },
+          type: NotificationType.Deposit,
+          payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
         });
-      }
 
-      const appointment = await manager.save(
-        manager.create(Appointment, {
-          professionalId: tenantId,
-          comercioId,
-          membershipId,
-          staffId: dto.staffId,
-          personId,
-          serviceId: service.id,
-          startAt,
-          endAt,
-          status: AppointmentStatus.Confirmed,
-          isProvisional: false,
-          createdVia: CreatedVia.ClientSelf,
-        }),
+        return { appointment, payment };
+      },
+    );
+
+    // El pago con MercadoPago necesita una preferencia (init_point) para que el
+    // cliente sea redirigido al checkout. Se crea fuera de la transacción (el pago
+    // ya está commiteado) con el token del PROFESIONAL y back_url a /reserva/resultado.
+    if (dto.method === PaymentMethod.MercadoPago && payment.status === PaymentStatus.Pending) {
+      const { initPoint } = await this.paymentsService.createMercadoPagoPreference(
+        tenantId,
+        payment.id,
+        dto.email ?? null,
       );
+      return { appointment, payment, mpInitPoint: initPoint };
+    }
 
-      await this.ensureProfessionalClient(tenantId, personId, manager);
-
-      const isCash = dto.method === PaymentMethod.Cash;
-      const payment = await manager.save(
-        manager.create(Payment, {
-          professionalId: tenantId,
-          appointmentId: appointment.id,
-          personId,
-          type: paymentType,
-          amountCents,
-          method: dto.method,
-          status: isCash ? PaymentStatus.Paid : PaymentStatus.Pending,
-          paidAt: isCash ? new Date() : null,
-        }),
-      );
-
-      await this.notifications.enqueue({
-        professionalId: tenantId,
-        personId,
-        channel: NotificationChannel.Email,
-        type: NotificationType.Deposit,
-        payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
-      });
-
-      return { appointment, payment };
-    });
+    return { appointment, payment };
   }
 
   // ---- Consultas ----

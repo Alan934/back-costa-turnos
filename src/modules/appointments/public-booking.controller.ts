@@ -180,7 +180,12 @@ export class PublicBookingController {
   }
 
   @ApiOperation({ summary: 'Reservar con seña/pago completo con un profesional del comercio' })
-  @ApiResponse({ status: 201, description: 'Objeto { appointment, payment }.' })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Objeto { appointment, payment, mpInitPoint? }. Con method=mercadopago, mpInitPoint ' +
+      'es la URL de checkout a la que el front debe redirigir.',
+  })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
   @Post('professionals/:membershipId/book-with-deposit')
@@ -253,7 +258,10 @@ export class PublicBookingController {
     summary: 'Reservar con seña (comercio-de-uno): auto-resuelve el único profesional',
     deprecated: true,
   })
-  @ApiResponse({ status: 201, description: 'Objeto { appointment, payment }.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Objeto { appointment, payment, mpInitPoint? } (ver ruta con membershipId).',
+  })
   @Post('book-with-deposit')
   async bookWithDepositFlat(@Param('slug') slug: string, @Body() dto: PublicBookWithDepositDto) {
     const comercio = await this.comercios.getComercioBySlug(slug);
