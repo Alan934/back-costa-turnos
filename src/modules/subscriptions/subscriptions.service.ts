@@ -91,7 +91,7 @@ export class SubscriptionsService {
       description: 'Suscripcion mensual Turnerito',
       amountCents: sub.amountCents,
       payerEmail: account?.email ?? null,
-      backUrl: this.frontUrl,
+      backUrl: `${this.frontUrl.replace(/\/$/, '')}/app/suscripcion`,
       notificationUrl: `${this.appUrl.replace(/\/$/, '')}/v1/subscription/mp/webhook`,
     });
     return { initPoint: pref.initPoint };

@@ -84,7 +84,7 @@ export class PaymentsService {
       payerEmail,
       sellerAccessToken: sellerToken,
       marketplaceFeeCents: feeCents,
-      backUrl: this.mp.frontReturnUrl,
+      backUrl: `${this.mp.frontReturnUrl.replace(/\/$/, '')}/reserva/resultado`,
       notificationUrl: `${this.backendUrl.replace(/\/$/, '')}/v1/payments/mp/webhook`,
     });
 
