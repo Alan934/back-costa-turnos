@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, EntityManager, In, Repository } from 'typeorm';
+import { uuidv7 } from 'uuidv7';
 import {
   AppointmentStatus,
   CancellationReason,
@@ -147,11 +148,13 @@ export class AppointmentsService {
     manager?: EntityManager,
   ): Promise<void> {
     const repo = manager ? manager.getRepository(ProfessionalClient) : this.professionalClients;
+    // El QueryBuilder NO dispara el hook @BeforeInsert de BaseEntity, asi que la PK
+    // (uuid v7 generada en la app) hay que setearla explicitamente o queda NULL.
     await repo
       .createQueryBuilder()
       .insert()
       .into(ProfessionalClient)
-      .values({ professionalId, personId, status: ProfessionalClientStatus.Active })
+      .values({ id: uuidv7(), professionalId, personId, status: ProfessionalClientStatus.Active })
       .orIgnore() // respeta uq_professional_client(professional_id, person_id)
       .execute();
   }
