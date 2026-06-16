@@ -216,6 +216,12 @@ export class ComerciosService {
     return this.findProfessionalByAccount(account.id);
   }
 
+  /** true si el profesional tiene su cuenta de MercadoPago conectada (cobros online). */
+  async hasMpConnected(professionalId: string): Promise<boolean> {
+    const professional = await this.professionals.findOne({ where: { id: professionalId } });
+    return Boolean(professional?.mpConnectedAt);
+  }
+
   /** Membresia activa de un profesional en un comercio (o lanza 404). */
   async getActiveMembership(professionalId: string, comercioId: string): Promise<Membership> {
     const membership = await this.memberships.findOne({

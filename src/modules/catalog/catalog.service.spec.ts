@@ -7,7 +7,7 @@ import { ComerciosService } from '@/modules/comercios/comercios.service';
 describe('CatalogService (opciones de pago)', () => {
   let service: CatalogService;
   let repo: { create: jest.Mock; save: jest.Mock };
-  let comercios: { getMembershipById: jest.Mock };
+  let comercios: { getMembershipById: jest.Mock; hasMpConnected: jest.Mock };
 
   const MEMBERSHIP_ID = 'membership-1';
 
@@ -20,6 +20,8 @@ describe('CatalogService (opciones de pago)', () => {
       getMembershipById: jest.fn(() =>
         Promise.resolve({ id: MEMBERSHIP_ID, professionalId: 'pro-1', comercioId: 'com-1' }),
       ),
+      // Por defecto el profesional tiene MP conectado (las opciones pagas se permiten).
+      hasMpConnected: jest.fn(() => Promise.resolve(true)),
     };
     service = new CatalogService(
       repo as unknown as Repository<Service>,
@@ -74,5 +76,28 @@ describe('CatalogService (opciones de pago)', () => {
         allowNoPayment: false,
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rechaza seña/pago completo si el profesional no tiene MP conectado', async () => {
+    comercios.hasMpConnected.mockResolvedValue(false);
+    await expect(
+      service.createForMembership(MEMBERSHIP_ID, {
+        name: 'Corte premium',
+        durationMinutes: 45,
+        priceCents: 80000,
+        allowFullPayment: true,
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('permite solo sin pago aunque no tenga MP conectado', async () => {
+    comercios.hasMpConnected.mockResolvedValue(false);
+    const result = await service.createForMembership(MEMBERSHIP_ID, {
+      name: 'Corte',
+      durationMinutes: 30,
+      priceCents: 50000,
+    });
+    expect(result.allowNoPayment).toBe(true);
+    expect(comercios.hasMpConnected).not.toHaveBeenCalled();
   });
 });

@@ -32,6 +32,23 @@ export class CatalogService {
     }
   }
 
+  /**
+   * Las opciones de cobro online (seña / pago completo) requieren que el
+   * profesional tenga su cuenta de MercadoPago conectada. El front ya lo valida
+   * por UX, pero el back lo rechaza igual (el front no es garantía de seguridad).
+   */
+  private async assertMpConnectedForPaidOptions(
+    professionalId: string,
+    f: PaymentFlags,
+  ): Promise<void> {
+    if (!f.allowDeposit && !f.allowFullPayment) return;
+    if (!(await this.comercios.hasMpConnected(professionalId))) {
+      throw new BadRequestException(
+        'El profesional debe conectar su cuenta de MercadoPago para habilitar seña o pago completo',
+      );
+    }
+  }
+
   // ---- Por membresía (profesional-en-comercio): servicios/precios de ese comercio ----
   listActiveByMembership(membershipId: string): Promise<Service[]> {
     return this.services.find({
@@ -63,6 +80,12 @@ export class CatalogService {
     const depositAmountCents = dto.depositAmountCents ?? null;
 
     this.assertPaymentOptions({ allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents });
+    await this.assertMpConnectedForPaidOptions(membership.professionalId, {
+      allowDeposit,
+      allowFullPayment,
+      allowNoPayment,
+      depositAmountCents,
+    });
 
     const service = this.services.create({
       professionalId: membership.professionalId,
@@ -85,12 +108,14 @@ export class CatalogService {
     dto: UpdateServiceDto,
   ): Promise<Service> {
     const service = await this.findByMembership(membershipId, id);
-    this.assertPaymentOptions({
+    const flags: PaymentFlags = {
       allowDeposit: dto.allowDeposit ?? service.allowDeposit,
       allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
       allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
       depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
-    });
+    };
+    this.assertPaymentOptions(flags);
+    await this.assertMpConnectedForPaidOptions(service.professionalId, flags);
     Object.assign(service, dto);
     return this.services.save(service);
   }
