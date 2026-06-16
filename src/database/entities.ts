@@ -10,11 +10,13 @@ import { ProfessionalClient } from '@/modules/clients/entities/professional-clie
 import { FichaField } from '@/modules/clients/entities/ficha-field.entity';
 import { ClientNote } from '@/modules/clients/entities/client-note.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { ScheduleRule } from '@/modules/availability/entities/schedule-rule.entity';
 import { ScheduleRuleService } from '@/modules/availability/entities/schedule-rule-service.entity';
 import { TimeOff } from '@/modules/availability/entities/time-off.entity';
 import { StaffCalendarIntegration } from '@/modules/availability/entities/staff-calendar-integration.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { AppointmentAddon } from '@/modules/appointments/entities/appointment-addon.entity';
 import { PendingBooking } from '@/modules/appointments/entities/pending-booking.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { WaitlistEntry } from '@/modules/waitlist/entities/waitlist-entry.entity';
@@ -42,11 +44,13 @@ export const entities = [
   FichaField,
   ClientNote,
   Service,
+  ServiceCombinationRule,
   ScheduleRule,
   ScheduleRuleService,
   TimeOff,
   StaffCalendarIntegration,
   Appointment,
+  AppointmentAddon,
   PendingBooking,
   Payment,
   WaitlistEntry,

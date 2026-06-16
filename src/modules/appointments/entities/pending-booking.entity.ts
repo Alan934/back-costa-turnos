@@ -74,4 +74,20 @@ export class PendingBooking extends BaseCreatedEntity {
   @ApiProperty({ type: String, format: 'date-time' })
   @Column({ name: 'expires_at', type: 'timestamptz' })
   expiresAt!: Date;
+
+  /**
+   * Datos de los add-ons seleccionados al momento de la reserva (snapshot).
+   * Null si el turno no tiene servicios adicionales.
+   * Estructura: AddonBookingSnapshot[]
+   */
+  @Column({ name: 'addon_data', type: 'jsonb', nullable: true })
+  addonData!: AddonBookingSnapshot[] | null;
+}
+
+export interface AddonBookingSnapshot {
+  serviceId: string;
+  serviceNameSnapshot: string;
+  priceAtBookingCents: number;
+  discountAppliedCents: number;
+  isFree: boolean;
 }

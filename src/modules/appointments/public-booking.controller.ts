@@ -9,6 +9,7 @@ import {
   Query,
   VERSION_NEUTRAL,
 } from '@nestjs/common';
+
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@/common/decorators/public.decorator';
 import { CreatedVia } from '@/common/enums';
@@ -16,6 +17,7 @@ import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { CatalogService } from '@/modules/catalog/catalog.service';
+import { ServiceCombinationRulesService } from '@/modules/catalog/service-combination-rules.service';
 import { AvailabilityService } from '@/modules/availability/availability.service';
 import { DayAvailabilityDto } from '@/modules/availability/dto/availability.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
@@ -43,6 +45,7 @@ export class PublicBookingController {
     private readonly availability: AvailabilityService,
     private readonly subscriptions: SubscriptionsService,
     private readonly appointments: AppointmentsService,
+    private readonly combinationRules: ServiceCombinationRulesService,
   ) {}
 
   /** Dirección visible: la propia de la membresía o, si no hay, la del comercio. */
@@ -127,6 +130,30 @@ export class PublicBookingController {
     };
   }
 
+  // ---- Reglas de combinación de un servicio (para el flujo de reserva público) ----
+  @ApiOperation({
+    summary: 'Reglas de combinación para un servicio (add-ons habilitados, exclusiones, descuentos)',
+    description:
+      'Devuelve las reglas donde sourceServiceId = serviceId. El frontend las usa para ' +
+      'mostrar qué add-ons puede agregar el cliente, qué descuentos aplican y qué servicios ' +
+      'no pueden combinarse.',
+  })
+  @ApiResponse({ status: 200, description: 'Array de ServiceCombinationRule con targetService cargado' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get('professionals/:membershipId/services/:serviceId/combination-rules')
+  async combinationRulesForService(
+    @Param('slug') slug: string,
+    @Param('membershipId') membershipId: string,
+    @Param('serviceId') serviceId: string,
+  ) {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const membership = await this.comercios.getActiveMembershipInComercio(
+      comercio.id,
+      membershipId,
+    );
+    return this.combinationRules.listBySourceService(membership.id, serviceId);
+  }
+
   // ---- Slots de un profesional del comercio ----
   @ApiOperation({ summary: 'Slots disponibles de un profesional en el comercio' })
   @ApiResponse({ status: 200, description: 'Array de slots (startAt/endAt UTC ISO).' })
@@ -136,12 +163,14 @@ export class PublicBookingController {
     @Param('slug') slug: string,
     @Param('membershipId') membershipId: string,
     @Query('serviceId') serviceId: string,
+    @Query('addonServiceIds') addonServiceIds: string | undefined,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
     await this.comercios.getActiveMembershipInComercio(comercio.id, membershipId);
-    return this.availability.computeSlotsByMembership(membershipId, serviceId, from, to);
+    const addonIds = addonServiceIds ? addonServiceIds.split(',').filter(Boolean) : [];
+    return this.availability.computeSlotsByMembership(membershipId, serviceId, from, to, addonIds);
   }
 
   // ---- Disponibilidad por día (motivo del bloqueo para el chip del front) ----
@@ -220,12 +249,14 @@ export class PublicBookingController {
   async slotsFlat(
     @Param('slug') slug: string,
     @Query('serviceId') serviceId: string,
+    @Query('addonServiceIds') addonServiceIds: string | undefined,
     @Query('from') from: string,
     @Query('to') to: string,
   ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
     const membership = await this.singleMembershipOrThrow(comercio.id);
-    return this.availability.computeSlotsByMembership(membership.id, serviceId, from, to);
+    const addonIds = addonServiceIds ? addonServiceIds.split(',').filter(Boolean) : [];
+    return this.availability.computeSlotsByMembership(membership.id, serviceId, from, to, addonIds);
   }
 
   @ApiOperation({

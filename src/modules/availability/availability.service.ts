@@ -210,16 +210,17 @@ export class AvailabilityService {
 
   /**
    * Slots libres de una membresía (profesional-en-comercio) para un servicio.
-   * Respeta horarios work-break, time_off, turnos ocupados, zona horaria del
-   * comercio y el mapeo regla<->servicio (reglas que apliquen al servicio o a todos).
+   * Si se pasan addonServiceIds, se suman sus duraciones a la del servicio principal
+   * para calcular el bloque total que debe estar libre.
    */
   async computeSlotsByMembership(
     membershipId: string,
     serviceId: string,
     from: string,
     to: string,
+    addonServiceIds: string[] = [],
   ): Promise<AvailableSlot[]> {
-    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to);
+    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to, addonServiceIds);
     return this.buildSlots(inputs);
   }
 
@@ -233,8 +234,9 @@ export class AvailabilityService {
     serviceId: string,
     from: string,
     to: string,
+    addonServiceIds: string[] = [],
   ): Promise<DayAvailabilityDto[]> {
-    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to);
+    const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to, addonServiceIds);
     const slots = this.buildSlots(inputs);
 
     // Días con al menos un slot libre.
@@ -299,6 +301,7 @@ export class AvailabilityService {
     serviceId: string,
     from: string,
     to: string,
+    addonServiceIds: string[] = [],
   ): Promise<{
     rangeStart: DateTime;
     rangeEnd: DateTime;
@@ -317,7 +320,15 @@ export class AvailabilityService {
     if (!service) throw new NotFoundException('Servicio no encontrado');
 
     const zone = comercio.timezone;
-    const duration = service.durationMinutes;
+    let duration = service.durationMinutes;
+
+    if (addonServiceIds.length > 0) {
+      const addonServices = await this.services.find({
+        where: { id: In(addonServiceIds), membershipId },
+        select: ['id', 'durationMinutes'],
+      });
+      duration += addonServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+    }
     const rangeStart = DateTime.fromISO(from, { zone }).startOf('day');
     const rangeEnd = DateTime.fromISO(to, { zone }).endOf('day');
     if (!rangeStart.isValid || !rangeEnd.isValid || rangeStart > rangeEnd) {
@@ -502,6 +513,7 @@ export class AvailabilityService {
     serviceId: string,
     from: string,
     to: string,
+    addonServiceIds: string[] = [],
   ): Promise<AvailableSlot[]> {
     await this.assertStaffInTenant(tenantId, staffId);
     return this.computeSlotsByMembership(
@@ -509,6 +521,7 @@ export class AvailabilityService {
       serviceId,
       from,
       to,
+      addonServiceIds,
     );
   }
 }

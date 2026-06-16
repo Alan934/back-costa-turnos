@@ -5,8 +5,11 @@ import { SubscriptionGuard } from '@/common/guards/subscription.guard';
 import { ComercioMembershipGuard } from '@/common/guards/comercio-membership.guard';
 import { CurrentMembership } from '@/common/decorators/current-comercio.decorator';
 import { CatalogService } from './catalog.service';
+import { ServiceCombinationRulesService } from './service-combination-rules.service';
 import { Service } from './entities/service.entity';
+import { ServiceCombinationRule } from './entities/service-combination-rule.entity';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
+import { CreateCombinationRuleDto } from './dto/service-combination-rule.dto';
 
 /**
  * Servicios/precios del profesional EN UN COMERCIO. El ComercioMembershipGuard
@@ -23,7 +26,10 @@ import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
 @UseGuards(JwtAuthGuard, ComercioMembershipGuard, SubscriptionGuard)
 @Controller('comercios/:comercioId/services')
 export class ComercioCatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly combinationRules: ServiceCombinationRulesService,
+  ) {}
 
   @ApiOperation({ summary: 'Listar servicios del profesional en este comercio' })
   @ApiResponse({ status: 200, type: Service, isArray: true })
@@ -65,5 +71,34 @@ export class ComercioCatalogController {
   @Delete(':id')
   deactivate(@CurrentMembership() membershipId: string, @Param('id') id: string) {
     return this.catalog.deactivateByMembership(membershipId, id);
+  }
+
+  // ---- Reglas de combinación de servicios ----
+
+  @ApiOperation({ summary: 'Listar reglas de combinación de la membresía' })
+  @ApiResponse({ status: 200, type: ServiceCombinationRule, isArray: true })
+  @Get('combination-rules')
+  listRules(@CurrentMembership() membershipId: string) {
+    return this.combinationRules.listByMembership(membershipId);
+  }
+
+  @ApiOperation({ summary: 'Crear una regla de combinación entre dos servicios' })
+  @ApiResponse({ status: 201, type: ServiceCombinationRule })
+  @ApiResponse({ status: 400, description: 'Datos inválidos o servicios en membresías distintas' })
+  @ApiResponse({ status: 409, description: 'Ya existe una regla de este tipo entre estos servicios' })
+  @Post('combination-rules')
+  createRule(
+    @CurrentMembership() membershipId: string,
+    @Body() dto: CreateCombinationRuleDto,
+  ) {
+    return this.combinationRules.create(membershipId, dto);
+  }
+
+  @ApiOperation({ summary: 'Eliminar una regla de combinación' })
+  @ApiResponse({ status: 200, description: 'Regla eliminada' })
+  @ApiResponse({ status: 404, description: 'No encontrada' })
+  @Delete('combination-rules/:ruleId')
+  deleteRule(@CurrentMembership() membershipId: string, @Param('ruleId') ruleId: string) {
+    return this.combinationRules.delete(membershipId, ruleId);
   }
 }

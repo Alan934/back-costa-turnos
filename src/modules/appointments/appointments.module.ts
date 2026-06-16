@@ -8,10 +8,12 @@ import { NotificationsModule } from '@/modules/notifications/notifications.modul
 import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from '@/modules/payments/payments.module';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { Appointment } from './entities/appointment.entity';
+import { AppointmentAddon } from './entities/appointment-addon.entity';
 import { PendingBooking } from './entities/pending-booking.entity';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentsController } from './appointments.controller';
@@ -23,8 +25,10 @@ import { AppointmentsJobs } from './appointments.jobs';
   imports: [
     TypeOrmModule.forFeature([
       Appointment,
+      AppointmentAddon,
       PendingBooking,
       Service,
+      ServiceCombinationRule,
       Staff,
       Payment,
       ProfessionalClient,

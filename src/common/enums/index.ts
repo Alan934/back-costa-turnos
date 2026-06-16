@@ -137,6 +137,18 @@ export enum SubscriptionPaymentStatus {
   Failed = 'failed',
 }
 
+export enum CombinationRuleType {
+  Enables = 'enables',
+  Excludes = 'excludes',
+  Discount = 'discount',
+  FreeWith = 'free_with',
+}
+
+export enum DiscountType {
+  Percentage = 'percentage',
+  Fixed = 'fixed',
+}
+
 export enum NotificationChannel {
   Email = 'email',
   Whatsapp = 'whatsapp',

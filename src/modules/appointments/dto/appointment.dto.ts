@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsISO8601, IsOptional, IsString, IsNotEmpty } from 'class-validator';
+import { IsArray, IsEmail, IsEnum, IsISO8601, IsOptional, IsString, IsNotEmpty, IsUUID } from 'class-validator';
 import { CancellationReason, PaymentMethod, PaymentOption } from '@/common/enums';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
@@ -42,6 +42,15 @@ export class BookAppointmentDto extends ClientRefDto {
   @ApiProperty({ example: '2026-06-10T13:00:00Z' })
   @IsISO8601()
   startAt!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'IDs de servicios adicionales habilitados por reglas de combinación',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  addonServiceIds?: string[];
 }
 
 export class BookWithDepositDto extends BookAppointmentDto {
@@ -91,6 +100,15 @@ export class PublicBookDto {
   @ApiProperty({ example: '2026-06-10T13:00:00Z' })
   @IsISO8601()
   startAt!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'IDs de servicios adicionales habilitados por reglas de combinación',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  addonServiceIds?: string[];
 }
 
 export class PublicBookWithDepositDto extends PublicBookDto {

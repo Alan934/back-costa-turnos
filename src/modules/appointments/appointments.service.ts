@@ -25,6 +25,8 @@ import { TenantContextService } from '@/common/context/tenant-context.service';
 import { PersonsService } from '@/modules/identity/persons.service';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
+import { ServiceCombinationRulesService } from '@/modules/catalog/service-combination-rules.service';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
@@ -32,7 +34,8 @@ import { NotificationsService } from '@/modules/notifications/notifications.serv
 import { PaymentsService } from '@/modules/payments/payments.service';
 import { AppointmentConfirmer } from '@/modules/payments/ports/appointment-confirmer.port';
 import { Appointment } from './entities/appointment.entity';
-import { PendingBooking } from './entities/pending-booking.entity';
+import { AppointmentAddon } from './entities/appointment-addon.entity';
+import { AddonBookingSnapshot, PendingBooking } from './entities/pending-booking.entity';
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
 import { QueueUpdatePayload, WaitingRoomGateway } from './waiting-room.gateway';
 
@@ -55,6 +58,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly appointments: Repository<Appointment>,
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    @InjectRepository(ServiceCombinationRule)
+    private readonly combinationRuleRepo: Repository<ServiceCombinationRule>,
     @InjectRepository(Payment)
     private readonly payments: Repository<Payment>,
     @InjectRepository(Staff)
@@ -63,12 +68,15 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly professionalClients: Repository<ProfessionalClient>,
     @InjectRepository(PendingBooking)
     private readonly pendingBookings: Repository<PendingBooking>,
+    @InjectRepository(AppointmentAddon)
+    private readonly addons: Repository<AppointmentAddon>,
     private readonly persons: PersonsService,
     private readonly tenantContext: TenantContextService,
     private readonly notifications: NotificationsService,
     private readonly waitingRoom: WaitingRoomGateway,
     private readonly comercios: ComerciosService,
     private readonly paymentsService: PaymentsService,
+    private readonly combinationRules: ServiceCombinationRulesService,
   ) {}
 
   /** Se registra como confirmador para que el webhook de pagos cree el turno. */
@@ -109,6 +117,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       startAt: string;
       method: PaymentMethod;
       paymentOption?: PaymentOption;
+      addonServiceIds?: string[];
     } & ClientRefDto,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
@@ -248,8 +257,17 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         'Este servicio requiere pago (seña o total) para reservar el turno',
       );
     }
+
+    const addonPricings = await this.combinationRules.resolveAddons(
+      service.membershipId,
+      service,
+      dto.addonServiceIds ?? [],
+    );
+    const totalDuration =
+      service.durationMinutes + addonPricings.reduce((s, a) => s + a.service.durationMinutes, 0);
+
     const startAt = new Date(dto.startAt);
-    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     const { comercioId, membershipId, minBookingHours } =
       await this.resolveComercioContext(service);
     this.assertLeadTime(startAt, minBookingHours);
@@ -282,6 +300,21 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
     const saved = await this.appointments.save(appointment);
     await this.ensureProfessionalClient(tenantId, personId);
+    if (addonPricings.length > 0) {
+      await this.addons.save(
+        addonPricings.map((a) =>
+          this.addons.create({
+            appointmentId: saved.id,
+            serviceId: a.service.id,
+            professionalId: tenantId,
+            serviceNameSnapshot: a.service.name,
+            priceAtBookingCents: a.priceAtBookingCents,
+            discountAppliedCents: a.discountAppliedCents,
+            isFree: a.isFree,
+          }),
+        ),
+      );
+    }
     return saved;
   }
 
@@ -309,6 +342,21 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       );
     }
 
+    // Resuelve y valida los add-ons antes de abrir la transacción.
+    const addonPricings = await this.combinationRules.resolveAddons(
+      service.membershipId,
+      service,
+      dto.addonServiceIds ?? [],
+    );
+    const addonData: AddonBookingSnapshot[] = addonPricings.map((a) => ({
+      serviceId: a.service.id,
+      serviceNameSnapshot: a.service.name,
+      priceAtBookingCents: a.priceAtBookingCents,
+      discountAppliedCents: a.discountAppliedCents,
+      isFree: a.isFree,
+    }));
+    const addonDuration = addonPricings.reduce((s, a) => s + a.service.durationMinutes, 0);
+
     // Resuelve monto y tipo según la opción elegida (seña o pago completo).
     let amountCents: number;
     let paymentType: PaymentType;
@@ -329,8 +377,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       paymentType = PaymentType.Deposit;
     }
 
+    const totalDuration = service.durationMinutes + addonDuration;
     const startAt = new Date(dto.startAt);
-    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     const { comercioId, membershipId, minBookingHours } =
       await this.resolveComercioContext(service);
     this.assertLeadTime(startAt, minBookingHours);
@@ -390,6 +439,21 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
             }),
           );
           await this.ensureProfessionalClient(tenantId, personId, manager);
+          if (addonData.length > 0) {
+            await manager.save(
+              addonData.map((a) =>
+                manager.create(AppointmentAddon, {
+                  appointmentId: appointment.id,
+                  serviceId: a.serviceId,
+                  professionalId: tenantId,
+                  serviceNameSnapshot: a.serviceNameSnapshot,
+                  priceAtBookingCents: a.priceAtBookingCents,
+                  discountAppliedCents: a.discountAppliedCents,
+                  isFree: a.isFree,
+                }),
+              ),
+            );
+          }
 
           const payment = await manager.save(
             manager.create(Payment, {
@@ -444,6 +508,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
             paymentType,
             paymentOption: option,
             expiresAt: new Date(Date.now() + HOLD_TTL_MINUTES * 60_000),
+            addonData: addonData.length > 0 ? addonData : null,
           }),
         );
         return { appointment: null as Appointment | null, payment };
@@ -545,6 +610,21 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         }),
       );
       await this.ensureProfessionalClient(payment.professionalId, pending.personId, manager);
+      if (pending.addonData && pending.addonData.length > 0) {
+        await manager.save(
+          pending.addonData.map((a) =>
+            manager.create(AppointmentAddon, {
+              appointmentId: appointment.id,
+              serviceId: a.serviceId,
+              professionalId: payment.professionalId,
+              serviceNameSnapshot: a.serviceNameSnapshot,
+              priceAtBookingCents: a.priceAtBookingCents,
+              discountAppliedCents: a.discountAppliedCents,
+              isFree: a.isFree,
+            }),
+          ),
+        );
+      }
       await manager.update(Payment, { id: payment.id }, { appointmentId: appointment.id });
       await manager.delete(PendingBooking, { id: pending.id });
 
