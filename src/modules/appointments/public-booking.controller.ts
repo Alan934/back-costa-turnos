@@ -51,11 +51,14 @@ export class PublicBookingController {
   }
 
   private toPublicProfessional(membership: Membership, comercio: Comercio): PublicProfessionalDto {
+    const settings = membership.professional?.publicPageSettings ?? {};
     return {
       membershipId: membership.id,
       professionalId: membership.professionalId,
       displayName: membership.professional?.businessName ?? 'Profesional',
       address: this.resolveAddress(membership, comercio),
+      bio: (settings.bio as string | undefined) ?? null,
+      phone: (settings.phone as string | undefined) ?? null,
     };
   }
 

@@ -18,6 +18,12 @@ export class PublicProfessionalDto {
     description: 'Dirección donde atiende: la propia de la membresía o la del comercio (fallback).',
   })
   address!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Descripción/bio del profesional (publicPageSettings.bio).' })
+  bio!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Teléfono/WhatsApp del profesional (publicPageSettings.phone).' })
+  phone!: string | null;
 }
 
 /** Respuesta de GET /r/:slug: la página pública del COMERCIO. */

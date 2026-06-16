@@ -8,6 +8,8 @@ export interface PublicPageSettings {
   logoFileId?: string;
   primaryColor?: string;
   description?: string;
+  bio?: string;
+  phone?: string;
   [key: string]: unknown;
 }
 
