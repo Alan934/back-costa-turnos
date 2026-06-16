@@ -63,6 +63,15 @@ export class Service extends BaseEntity {
   @Column({ name: 'deposit_amount_cents', type: 'integer', nullable: true })
   depositAmountCents!: number | null;
 
+  /**
+   * Cuántos clientes pueden reservar el mismo horario para este servicio.
+   * Default 1 (exclusivo). Útil para servicios grupales o con equipamiento paralelo
+   * (ej. autolavado con dos pistas: capacity 2 permite dos reservas simultáneas).
+   */
+  @ApiProperty({ type: Number, default: 1, minimum: 1 })
+  @Column({ name: 'capacity', type: 'integer', default: 1 })
+  capacity!: number;
+
   @ApiProperty({ type: Boolean })
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;

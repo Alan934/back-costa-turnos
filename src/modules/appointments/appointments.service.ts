@@ -275,12 +275,17 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
     const holds = await this.pendingHolds(this.pendingBookings, tenantId, startAt, endAt);
-    // Cualquier turno activo (incluido un provisional) o un hold de pago en curso
-    // bloquea una reserva casual.
-    if (conflicts.length > 0 || holds.length > 0) {
-      throw new ConflictException(
-        'El horario ya no esta disponible. Si hay una reserva provisional, podes tomarlo pagando.',
-      );
+
+    const otherServiceConflict = conflicts.some((a) => a.serviceId !== service.id);
+    const otherServiceHold = holds.some((h) => h.serviceId !== service.id);
+    const sameServiceCount =
+      conflicts.filter((a) => a.serviceId === service.id).length +
+      holds.filter((h) => h.serviceId === service.id).length;
+
+    // Otro servicio en el mismo horario → el profesional está ocupado.
+    // O el cupo del servicio está lleno → sin lugar.
+    if (otherServiceConflict || otherServiceHold || sameServiceCount >= service.capacity) {
+      throw new ConflictException('El horario ya no esta disponible.');
     }
 
     // Provisional (desplazable) solo si el servicio también admite pago.
@@ -400,17 +405,38 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         const conflicts = await this.overlapping(manager, tenantId, startAt, endAt);
         const holds = await this.pendingHolds(manager, tenantId, startAt, endAt);
 
-        const firmConflict = conflicts.find((a) => !a.isProvisional);
-        // Un hold de pago en curso bloquea (es plata en proceso: no se desplaza).
-        if (firmConflict || holds.length > 0) {
+        // Otro servicio en el horario → el profesional está ocupado (no puede
+        // atender dos servicios distintos al mismo tiempo).
+        // Holds de otro servicio → idem.
+        const otherServiceConflict = conflicts.some((a) => a.serviceId !== service.id);
+        const otherServiceHold = holds.some((h) => h.serviceId !== service.id);
+        if (otherServiceConflict || otherServiceHold) {
           throw new ConflictException('El horario ya esta tomado');
         }
 
+        // Turnos del mismo servicio partidos por firmeza.
+        const sameConflicts = conflicts.filter((a) => a.serviceId === service.id);
+        const firmSame = sameConflicts.filter((a) => !a.isProvisional);
+        const provSame = sameConflicts.filter((a) => a.isProvisional);
+        // Los holds del mismo servicio se cuentan como spots firmes (pago en proceso,
+        // no se pueden desplazar).
+        const sameHolds = holds.filter((h) => h.serviceId === service.id);
+        const firmOccupied = firmSame.length + sameHolds.length;
+
+        if (firmOccupied >= service.capacity) {
+          throw new ConflictException('El horario ya esta tomado');
+        }
+
+        // Cuántos provisionales hay que desplazar para que, sumando el nuevo turno,
+        // el cupo no se supere. provToKeep = capacity - firmOccupied - 1 (la nueva reserva).
+        const provToKeep = service.capacity - firmOccupied - 1;
+        const provToBump = provSame.slice(Math.max(0, provToKeep));
+
         // EFECTIVO: el turno se confirma en el acto (no hay checkout). Mantiene el
         // comportamiento original: crea el Appointment + Payment Paid y bumpea
-        // provisionales que ocupen el horario.
+        // provisionales que sobren.
         if (isCash) {
-          for (const prov of conflicts.filter((a) => a.isProvisional)) {
+          for (const prov of provToBump) {
             prov.status = AppointmentStatus.Cancelled;
             prov.cancellationReason = CancellationReason.Bumped;
             await manager.save(prov);

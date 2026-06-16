@@ -97,6 +97,7 @@ export class CatalogService {
       allowFullPayment,
       allowNoPayment,
       depositAmountCents,
+      capacity: dto.capacity ?? 1,
       isActive: true,
     });
     return this.services.save(service);

@@ -307,6 +307,8 @@ export class AvailabilityService {
     rangeEnd: DateTime;
     zone: string;
     duration: number;
+    targetServiceId: string;
+    capacity: number;
     workByDay: Map<number, ScheduleRule[]>;
     breaksByDay: Map<number, ScheduleRule[]>;
     timeOffs: TimeOff[];
@@ -381,6 +383,8 @@ export class AvailabilityService {
       rangeEnd,
       zone,
       duration,
+      targetServiceId: serviceId,
+      capacity: service.capacity,
       workByDay,
       breaksByDay,
       timeOffs,
@@ -394,21 +398,18 @@ export class AvailabilityService {
     rangeStart: DateTime;
     rangeEnd: DateTime;
     duration: number;
+    targetServiceId: string;
+    capacity: number;
     workByDay: Map<number, ScheduleRule[]>;
     breaksByDay: Map<number, ScheduleRule[]>;
     timeOffs: TimeOff[];
     busy: Appointment[];
     minBookingHours?: number;
   }): AvailableSlot[] {
-    const { rangeStart, rangeEnd, duration, workByDay, breaksByDay, timeOffs, busy } = args;
-    const occupied: Interval[] = [
-      ...timeOffs.map((t) =>
-        Interval.fromDateTimes(DateTime.fromJSDate(t.startAt), DateTime.fromJSDate(t.endAt)),
-      ),
-      ...busy.map((a) =>
-        Interval.fromDateTimes(DateTime.fromJSDate(a.startAt), DateTime.fromJSDate(a.endAt)),
-      ),
-    ];
+    const { rangeStart, rangeEnd, duration, targetServiceId, capacity, workByDay, breaksByDay, timeOffs, busy } = args;
+    const timeOffIntervals: Interval[] = timeOffs.map((t) =>
+      Interval.fromDateTimes(DateTime.fromJSDate(t.startAt), DateTime.fromJSDate(t.endAt)),
+    );
 
     // Punto de corte: un slot debe empezar a partir de "ahora + anticipación
     // mínima". Con minBookingHours=0 equivale a "no en el pasado".
@@ -442,7 +443,32 @@ export class AvailabilityService {
             return slotInterval.overlaps(bInterval);
           });
 
-          const overlapsOccupied = occupied.some((o) => slotInterval.overlaps(o));
+          // Time-off siempre bloquea.
+          const timeOffBlocked = timeOffIntervals.some((o) => slotInterval.overlaps(o));
+
+          // Turnos del mismo servicio: se comparan contra la capacidad.
+          // Turnos de otros servicios: bloquean si hay al menos uno (el profesional
+          // no puede atender dos servicios distintos al mismo tiempo).
+          let sameServiceCount = 0;
+          let otherServiceBlocked = false;
+          for (const appt of busy) {
+            const apptInterval = Interval.fromDateTimes(
+              DateTime.fromJSDate(appt.startAt),
+              DateTime.fromJSDate(appt.endAt),
+            );
+            if (!slotInterval.overlaps(apptInterval)) continue;
+            if (appt.serviceId === targetServiceId) {
+              sameServiceCount++;
+            } else {
+              otherServiceBlocked = true;
+              break;
+            }
+          }
+
+          const overlapsOccupied =
+            timeOffBlocked ||
+            otherServiceBlocked ||
+            sameServiceCount >= capacity;
           const tooSoon = slotStart < earliestStart;
 
           if (!overlapsBreak && !overlapsOccupied && !tooSoon) {

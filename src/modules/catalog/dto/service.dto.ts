@@ -40,6 +40,16 @@ export class CreateServiceDto {
   @IsInt()
   @Min(0)
   depositAmountCents?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Cuántos clientes pueden reservar el mismo horario (default 1)',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  capacity?: number;
 }
 
 export class UpdateServiceDto extends PartialType(CreateServiceDto) {
