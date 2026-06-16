@@ -7,6 +7,7 @@ import { AppConfig, MercadoPagoConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Payment } from './entities/payment.entity';
 import { PAYMENT_PROVIDER, PaymentProvider } from './ports/payment-provider.port';
+import { AppointmentConfirmer } from './ports/appointment-confirmer.port';
 import { MercadoPagoOAuthService } from './providers/mercadopago-oauth.service';
 
 /** external_reference de las señas/turnos en MercadoPago. */
@@ -17,6 +18,12 @@ export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly mp: MercadoPagoConfig;
   private readonly backendUrl: string;
+  /**
+   * Confirmador de reservas (AppointmentsService). Se registra en runtime para
+   * evitar la dependencia circular PaymentsModule -> AppointmentsModule. Si no
+   * está registrado, el webhook solo marca el pago (sin crear el turno).
+   */
+  private confirmer?: AppointmentConfirmer;
 
   constructor(
     @InjectRepository(Payment)
@@ -30,6 +37,11 @@ export class PaymentsService {
   ) {
     this.mp = config.getOrThrow<MercadoPagoConfig>('mercadopago');
     this.backendUrl = config.getOrThrow<AppConfig>('app').appUrl;
+  }
+
+  /** AppointmentsService se registra aquí en su onModuleInit (ver port). */
+  registerAppointmentConfirmer(confirmer: AppointmentConfirmer): void {
+    this.confirmer = confirmer;
   }
 
   list(tenantId: string): Promise<Payment[]> {
@@ -126,10 +138,20 @@ export class PaymentsService {
     if (result.paid) {
       payment.status = PaymentStatus.Paid;
       payment.paidAt = new Date();
+      await this.payments.save(payment);
+      // F4: si el turno aún no existe (flujo MercadoPago), se crea recién ahora a
+      // partir del pending_booking. Idempotente del lado del confirmer.
+      if (!payment.appointmentId && this.confirmer) {
+        await this.confirmer.confirmPaidBooking(payment);
+      }
     } else {
       payment.status = PaymentStatus.Failed;
+      await this.payments.save(payment);
+      // Pago rechazado: libera el hold del horario (si había pending_booking).
+      if (!payment.appointmentId && this.confirmer) {
+        await this.confirmer.releasePending(payment.id);
+      }
     }
-    await this.payments.save(payment);
   }
 
   /**

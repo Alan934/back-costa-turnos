@@ -1,9 +1,14 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import request from 'supertest';
 import { DateTime } from 'luxon';
 import { AppModule } from '@/app.module';
 import { AppointmentStatus, CancellationReason } from '@/common/enums';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { PAYMENT_PROVIDER } from '@/modules/payments/ports/payment-provider.port';
+import { MercadoPagoStubProvider } from '@/modules/payments/providers/mercadopago-stub.provider';
 
 /**
  * E2E del flujo de reserva. Requiere Postgres + Redis levantados y la migracion
@@ -27,7 +32,10 @@ describe('Booking flow (e2e)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PAYMENT_PROVIDER)
+      .useClass(MercadoPagoStubProvider)
+      .compile();
 
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -56,6 +64,14 @@ describe('Booking flow (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
     staffId = staffRes.body[0].id;
+
+    // Conectar MP antes de crear el servicio con opciones de pago online
+    const proRepo = app.get<Repository<Professional>>(getRepositoryToken(Professional));
+    const pro = await proRepo.findOne({ where: {}, order: { createdAt: 'DESC' } });
+    await proRepo.update(
+      { id: pro!.id },
+      { mpConnectedAt: new Date(), mpUserId: 'test-seller', mpAccessToken: 'TEST-stub-token' },
+    );
 
     const svc = await http
       .post('/v1/services')
@@ -125,5 +141,75 @@ describe('Booking flow (e2e)', () => {
       .expect(200);
     expect(bumped.body.status).toBe(AppointmentStatus.Cancelled);
     expect(bumped.body.cancellationReason).toBe(CancellationReason.Bumped);
+  });
+
+  describe('F4: reserva con MercadoPago crea el turno recién al acreditar', () => {
+    let mpSlot: string;
+    let mpPaymentId: string;
+
+    it('reserva con method=mercadopago NO crea el turno (appointment null) y devuelve initPoint', async () => {
+      // Tomar un slot distinto al del bloque anterior (dia +2) para no chocar.
+      const day = DateTime.now().plus({ days: 2 }).toISODate();
+      const slots = await http
+        .get(`/v1/availability/slots`)
+        .query({ staffId, serviceId, from: day, to: day })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      mpSlot = slots.body[0].startAt;
+
+      const res = await http
+        .post(`/r/${slug}/book-with-deposit`)
+        .send({ serviceId, startAt: mpSlot, fullName: 'Cliente MP', method: 'mercadopago' })
+        .expect(201);
+
+      expect(res.body.appointment).toBeNull();
+      expect(res.body.mpInitPoint).toContain('mercadopago');
+      expect(res.body.payment.status).toBe('pending');
+      mpPaymentId = res.body.payment.id;
+
+      // El turno no aparece en la agenda todavia.
+      const list = await http
+        .get('/v1/appointments')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      expect(list.body.some((a: { startAt: string }) => a.startAt === mpSlot)).toBe(false);
+    });
+
+    it('el horario queda en hold: una reserva casual al mismo slot da 409', async () => {
+      await http
+        .post(`/r/${slug}/book`)
+        .send({ staffId, serviceId, startAt: mpSlot, fullName: 'Colado' })
+        .expect(409);
+    });
+
+    it('el webhook aprobado crea el turno (confirmed) y libera el hold', async () => {
+      await http
+        .post('/v1/payments/mp/webhook')
+        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: 'mp-test-1' })
+        .expect(200);
+
+      const list = await http
+        .get('/v1/appointments')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      const created = list.body.find((a: { startAt: string }) => a.startAt === mpSlot);
+      expect(created).toBeDefined();
+      expect(created.status).toBe(AppointmentStatus.Confirmed);
+      expect(created.isProvisional).toBe(false);
+    });
+
+    it('reenviar el mismo webhook es idempotente (no duplica el turno)', async () => {
+      await http
+        .post('/v1/payments/mp/webhook')
+        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: 'mp-test-1' })
+        .expect(200);
+
+      const list = await http
+        .get('/v1/appointments')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      const matches = list.body.filter((a: { startAt: string }) => a.startAt === mpSlot);
+      expect(matches.length).toBe(1);
+    });
   });
 });

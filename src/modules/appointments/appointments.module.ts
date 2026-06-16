@@ -12,14 +12,23 @@ import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { Appointment } from './entities/appointment.entity';
+import { PendingBooking } from './entities/pending-booking.entity';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentsController } from './appointments.controller';
 import { PublicBookingController } from './public-booking.controller';
 import { WaitingRoomGateway } from './waiting-room.gateway';
+import { AppointmentsJobs } from './appointments.jobs';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Appointment, Service, Staff, Payment, ProfessionalClient]),
+    TypeOrmModule.forFeature([
+      Appointment,
+      PendingBooking,
+      Service,
+      Staff,
+      Payment,
+      ProfessionalClient,
+    ]),
     IdentityModule,
     CatalogModule,
     ProfessionalsModule,
@@ -29,7 +38,7 @@ import { WaitingRoomGateway } from './waiting-room.gateway';
     PaymentsModule,
   ],
   controllers: [AppointmentsController, PublicBookingController],
-  providers: [AppointmentsService, WaitingRoomGateway],
+  providers: [AppointmentsService, WaitingRoomGateway, AppointmentsJobs],
   exports: [AppointmentsService],
 })
 export class AppointmentsModule {}

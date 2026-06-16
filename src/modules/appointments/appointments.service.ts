@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, EntityManager, In, Repository } from 'typeorm';
@@ -28,7 +30,9 @@ import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { PaymentsService } from '@/modules/payments/payments.service';
+import { AppointmentConfirmer } from '@/modules/payments/ports/appointment-confirmer.port';
 import { Appointment } from './entities/appointment.entity';
+import { PendingBooking } from './entities/pending-booking.entity';
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
 import { QueueUpdatePayload, WaitingRoomGateway } from './waiting-room.gateway';
 
@@ -39,8 +43,13 @@ const ACTIVE_STATUSES = [
   AppointmentStatus.InProgress,
 ];
 
+/** Minutos que un horario queda reservado (hold) mientras se paga con MercadoPago. */
+const HOLD_TTL_MINUTES = 15;
+
 @Injectable()
-export class AppointmentsService {
+export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
@@ -52,6 +61,8 @@ export class AppointmentsService {
     private readonly staff: Repository<Staff>,
     @InjectRepository(ProfessionalClient)
     private readonly professionalClients: Repository<ProfessionalClient>,
+    @InjectRepository(PendingBooking)
+    private readonly pendingBookings: Repository<PendingBooking>,
     private readonly persons: PersonsService,
     private readonly tenantContext: TenantContextService,
     private readonly notifications: NotificationsService,
@@ -59,6 +70,11 @@ export class AppointmentsService {
     private readonly comercios: ComerciosService,
     private readonly paymentsService: PaymentsService,
   ) {}
+
+  /** Se registra como confirmador para que el webhook de pagos cree el turno. */
+  onModuleInit(): void {
+    this.paymentsService.registerAppointmentConfirmer(this);
+  }
 
   /**
    * Resuelve professionalId + staffId a partir de una membresía (para reservas
@@ -94,7 +110,7 @@ export class AppointmentsService {
       method: PaymentMethod;
       paymentOption?: PaymentOption;
     } & ClientRefDto,
-  ): Promise<{ appointment: Appointment; payment: Payment; mpInitPoint?: string }> {
+  ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
     return this.bookWithDeposit(professionalId, { ...dto, staffId });
   }
@@ -196,6 +212,26 @@ export class AppointmentsService {
   }
 
   /**
+   * Reservas pendientes de pago (pending_booking) NO vencidas que solapan
+   * [start,end) para este profesional. Cada una mantiene un "hold" del horario
+   * mientras el cliente paga con MercadoPago: bloquea como si fuera un turno firme.
+   */
+  private pendingHolds(
+    manager: EntityManager | Repository<PendingBooking>,
+    professionalId: string,
+    start: Date,
+    end: Date,
+  ): Promise<PendingBooking[]> {
+    const repo = manager instanceof Repository ? manager : manager.getRepository(PendingBooking);
+    return repo
+      .createQueryBuilder('p')
+      .where('p.professional_id = :professionalId', { professionalId })
+      .andWhere('p.expires_at > now()')
+      .andWhere('p.start_at < :end AND p.end_at > :start', { start, end })
+      .getMany();
+  }
+
+  /**
    * Reserva un turno SIN pagar.
    * - Si el servicio NO permite "sin pago" -> rechaza (hay que pagar seña o total).
    * - Si además hay una opción paga habilitada -> queda provisional (desplazable
@@ -220,8 +256,10 @@ export class AppointmentsService {
     const personId = await this.resolvePersonId(dto);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
-    // Cualquier turno activo (incluido un provisional) bloquea una reserva casual.
-    if (conflicts.length > 0) {
+    const holds = await this.pendingHolds(this.pendingBookings, tenantId, startAt, endAt);
+    // Cualquier turno activo (incluido un provisional) o un hold de pago en curso
+    // bloquea una reserva casual.
+    if (conflicts.length > 0 || holds.length > 0) {
       throw new ConflictException(
         'El horario ya no esta disponible. Si hay una reserva provisional, podes tomarlo pagando.',
       );
@@ -256,7 +294,7 @@ export class AppointmentsService {
   async bookWithDeposit(
     tenantId: string,
     dto: BookWithDepositDto,
-  ): Promise<{ appointment: Appointment; payment: Payment; mpInitPoint?: string }> {
+  ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const service = await this.loadService(tenantId, dto.serviceId);
     const option = dto.paymentOption ?? PaymentOption.Deposit;
 
@@ -298,6 +336,8 @@ export class AppointmentsService {
     this.assertLeadTime(startAt, minBookingHours);
     const personId = await this.resolvePersonId(dto);
 
+    const isCash = dto.method === PaymentMethod.Cash;
+
     const { appointment, payment } = await this.tenantContext.runWithTenant(
       tenantId,
       async (manager) => {
@@ -309,28 +349,88 @@ export class AppointmentsService {
         await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [tenantId]);
 
         const conflicts = await this.overlapping(manager, tenantId, startAt, endAt);
+        const holds = await this.pendingHolds(manager, tenantId, startAt, endAt);
 
         const firmConflict = conflicts.find((a) => !a.isProvisional);
-        if (firmConflict) {
+        // Un hold de pago en curso bloquea (es plata en proceso: no se desplaza).
+        if (firmConflict || holds.length > 0) {
           throw new ConflictException('El horario ya esta tomado');
         }
 
-        // Desplaza provisionales que ocupan el horario.
-        for (const prov of conflicts.filter((a) => a.isProvisional)) {
-          prov.status = AppointmentStatus.Cancelled;
-          prov.cancellationReason = CancellationReason.Bumped;
-          await manager.save(prov);
+        // EFECTIVO: el turno se confirma en el acto (no hay checkout). Mantiene el
+        // comportamiento original: crea el Appointment + Payment Paid y bumpea
+        // provisionales que ocupen el horario.
+        if (isCash) {
+          for (const prov of conflicts.filter((a) => a.isProvisional)) {
+            prov.status = AppointmentStatus.Cancelled;
+            prov.cancellationReason = CancellationReason.Bumped;
+            await manager.save(prov);
+            await this.notifications.enqueue({
+              professionalId: tenantId,
+              personId: prov.personId,
+              channel: NotificationChannel.Email,
+              type: NotificationType.Bumped,
+              payload: { appointmentId: prov.id, startAt: prov.startAt.toISOString() },
+            });
+          }
+
+          const appointment = await manager.save(
+            manager.create(Appointment, {
+              professionalId: tenantId,
+              comercioId,
+              membershipId,
+              staffId: dto.staffId,
+              personId,
+              serviceId: service.id,
+              startAt,
+              endAt,
+              status: AppointmentStatus.Confirmed,
+              isProvisional: false,
+              createdVia: CreatedVia.ClientSelf,
+            }),
+          );
+          await this.ensureProfessionalClient(tenantId, personId, manager);
+
+          const payment = await manager.save(
+            manager.create(Payment, {
+              professionalId: tenantId,
+              appointmentId: appointment.id,
+              personId,
+              type: paymentType,
+              amountCents,
+              method: dto.method,
+              status: PaymentStatus.Paid,
+              paidAt: new Date(),
+            }),
+          );
           await this.notifications.enqueue({
             professionalId: tenantId,
-            personId: prov.personId,
+            personId,
             channel: NotificationChannel.Email,
-            type: NotificationType.Bumped,
-            payload: { appointmentId: prov.id, startAt: prov.startAt.toISOString() },
+            type: NotificationType.Deposit,
+            payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
           });
+          return { appointment: appointment as Appointment | null, payment };
         }
 
-        const appointment = await manager.save(
-          manager.create(Appointment, {
+        // MERCADOPAGO (F4): NO se crea el turno todavía. Solo el Payment Pending y
+        // un pending_booking que reserva el horario (hold) y guarda los datos para
+        // que el webhook cree el Appointment al acreditar. Sin notificación ni
+        // ensureProfessionalClient: eso ocurre recién al confirmar el pago.
+        const payment = await manager.save(
+          manager.create(Payment, {
+            professionalId: tenantId,
+            appointmentId: null,
+            personId,
+            type: paymentType,
+            amountCents,
+            method: dto.method,
+            status: PaymentStatus.Pending,
+            paidAt: null,
+          }),
+        );
+        await manager.save(
+          manager.create(PendingBooking, {
             professionalId: tenantId,
             comercioId,
             membershipId,
@@ -339,37 +439,14 @@ export class AppointmentsService {
             serviceId: service.id,
             startAt,
             endAt,
-            status: AppointmentStatus.Confirmed,
-            isProvisional: false,
-            createdVia: CreatedVia.ClientSelf,
-          }),
-        );
-
-        await this.ensureProfessionalClient(tenantId, personId, manager);
-
-        const isCash = dto.method === PaymentMethod.Cash;
-        const payment = await manager.save(
-          manager.create(Payment, {
-            professionalId: tenantId,
-            appointmentId: appointment.id,
-            personId,
-            type: paymentType,
+            paymentId: payment.id,
             amountCents,
-            method: dto.method,
-            status: isCash ? PaymentStatus.Paid : PaymentStatus.Pending,
-            paidAt: isCash ? new Date() : null,
+            paymentType,
+            paymentOption: option,
+            expiresAt: new Date(Date.now() + HOLD_TTL_MINUTES * 60_000),
           }),
         );
-
-        await this.notifications.enqueue({
-          professionalId: tenantId,
-          personId,
-          channel: NotificationChannel.Email,
-          type: NotificationType.Deposit,
-          payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
-        });
-
-        return { appointment, payment };
+        return { appointment: null as Appointment | null, payment };
       },
     );
 
@@ -377,15 +454,131 @@ export class AppointmentsService {
     // cliente sea redirigido al checkout. Se crea fuera de la transacción (el pago
     // ya está commiteado) con el token del PROFESIONAL y back_url a /reserva/resultado.
     if (dto.method === PaymentMethod.MercadoPago && payment.status === PaymentStatus.Pending) {
-      const { initPoint } = await this.paymentsService.createMercadoPagoPreference(
-        tenantId,
-        payment.id,
-        dto.email ?? null,
-      );
-      return { appointment, payment, mpInitPoint: initPoint };
+      try {
+        const { initPoint } = await this.paymentsService.createMercadoPagoPreference(
+          tenantId,
+          payment.id,
+          dto.email ?? null,
+        );
+        return { appointment, payment, mpInitPoint: initPoint };
+      } catch (err) {
+        // Si no se pudo abrir el checkout, no dejar el hold fantasma: borra el
+        // pending_booking (y el pago en cascada) para liberar el horario.
+        await this.pendingBookings.delete({ paymentId: payment.id });
+        await this.payments.delete({ id: payment.id });
+        throw err;
+      }
     }
 
     return { appointment, payment };
+  }
+
+  /**
+   * (AppointmentConfirmer) Lo llama el webhook de pagos cuando un pago de turno se
+   * acredita y todavía no tiene Appointment (flujo MercadoPago F4): crea el turno
+   * a partir del pending_booking y lo borra. Idempotente y serializado por el mismo
+   * advisory lock que bookWithDeposit.
+   */
+  async confirmPaidBooking(payment: Payment): Promise<void> {
+    await this.tenantContext.runWithTenant(payment.professionalId, async (manager) => {
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+        payment.professionalId,
+      ]);
+
+      // Idempotencia: si otro webhook ya creó el turno para este pago, salir.
+      const current = await manager.findOne(Payment, { where: { id: payment.id } });
+      if (current?.appointmentId) return;
+
+      const pending = await manager.findOne(PendingBooking, {
+        where: { paymentId: payment.id },
+      });
+      if (!pending) {
+        // El hold expiró y fue limpiado, o webhook tardío sin datos del slot.
+        this.logger.warn(
+          `Pago ${payment.id} acreditado sin pending_booking: no se pudo crear el turno`,
+        );
+        return;
+      }
+
+      const conflicts = await this.overlapping(
+        manager,
+        payment.professionalId,
+        pending.startAt,
+        pending.endAt,
+      );
+      // Desplaza provisionales que ocupen el horario (igual que en efectivo).
+      for (const prov of conflicts.filter((a) => a.isProvisional)) {
+        prov.status = AppointmentStatus.Cancelled;
+        prov.cancellationReason = CancellationReason.Bumped;
+        await manager.save(prov);
+        await this.notifications.enqueue({
+          professionalId: payment.professionalId,
+          personId: prov.personId,
+          channel: NotificationChannel.Email,
+          type: NotificationType.Bumped,
+          payload: { appointmentId: prov.id, startAt: prov.startAt.toISOString() },
+        });
+      }
+      // El cliente ya pagó: si el slot quedó tomado por un firme (hold vencido +
+      // carrera), se crea igual y se loguea para resolución manual (overbooking).
+      const firmConflict = conflicts.find((a) => !a.isProvisional);
+      if (firmConflict) {
+        this.logger.warn(
+          `Overbooking: pago ${payment.id} acreditado sobre un turno firme existente ` +
+            `(${pending.startAt.toISOString()}). Revisar manualmente.`,
+        );
+      }
+
+      const appointment = await manager.save(
+        manager.create(Appointment, {
+          professionalId: payment.professionalId,
+          comercioId: pending.comercioId,
+          membershipId: pending.membershipId,
+          staffId: pending.staffId,
+          personId: pending.personId,
+          serviceId: pending.serviceId,
+          startAt: pending.startAt,
+          endAt: pending.endAt,
+          status: AppointmentStatus.Confirmed,
+          isProvisional: false,
+          createdVia: CreatedVia.ClientSelf,
+        }),
+      );
+      await this.ensureProfessionalClient(payment.professionalId, pending.personId, manager);
+      await manager.update(Payment, { id: payment.id }, { appointmentId: appointment.id });
+      await manager.delete(PendingBooking, { id: pending.id });
+
+      await this.notifications.enqueue({
+        professionalId: payment.professionalId,
+        personId: pending.personId,
+        channel: NotificationChannel.Email,
+        type: NotificationType.Deposit,
+        payload: { appointmentId: appointment.id, amountCents: pending.amountCents },
+      });
+    });
+  }
+
+  /**
+   * (AppointmentConfirmer) Libera el hold (borra el pending_booking) de un pago
+   * fallido/cancelado, dejando el horario disponible de inmediato.
+   */
+  async releasePending(paymentId: string): Promise<void> {
+    await this.pendingBookings.delete({ paymentId });
+  }
+
+  /**
+   * Housekeeping: borra los pending_booking vencidos hace rato. Margen amplio (1h)
+   * respecto al TTL (15 min) para no borrar uno que un webhook tardío esté por
+   * confirmar. La corrección funcional NO depende de esto (el hold ya caduca por
+   * expires_at); esto solo evita que la tabla crezca sin fin.
+   */
+  async purgeExpiredHolds(): Promise<number> {
+    const res = await this.pendingBookings
+      .createQueryBuilder()
+      .delete()
+      .where(`expires_at < now() - interval '1 hour'`)
+      .execute();
+    return res.affected ?? 0;
   }
 
   // ---- Consultas ----

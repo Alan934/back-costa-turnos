@@ -15,6 +15,7 @@ import { ScheduleRuleService } from '@/modules/availability/entities/schedule-ru
 import { TimeOff } from '@/modules/availability/entities/time-off.entity';
 import { StaffCalendarIntegration } from '@/modules/availability/entities/staff-calendar-integration.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { PendingBooking } from '@/modules/appointments/entities/pending-booking.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { WaitlistEntry } from '@/modules/waitlist/entities/waitlist-entry.entity';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
@@ -46,6 +47,7 @@ export const entities = [
   TimeOff,
   StaffCalendarIntegration,
   Appointment,
+  PendingBooking,
   Payment,
   WaitlistEntry,
   Subscription,

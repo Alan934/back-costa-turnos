@@ -183,8 +183,9 @@ export class PublicBookingController {
   @ApiResponse({
     status: 201,
     description:
-      'Objeto { appointment, payment, mpInitPoint? }. Con method=mercadopago, mpInitPoint ' +
-      'es la URL de checkout a la que el front debe redirigir.',
+      'Objeto { appointment, payment, mpInitPoint? }. Con method=mercadopago, appointment es ' +
+      'null (el turno se crea al acreditarse el pago vía webhook) y mpInitPoint es la URL de ' +
+      'checkout a la que el front debe redirigir. El horario queda reservado (hold) ~15 min.',
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
