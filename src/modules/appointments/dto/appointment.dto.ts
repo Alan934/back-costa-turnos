@@ -62,10 +62,27 @@ export class BookWithDepositDto extends BookAppointmentDto {
 }
 
 /**
- * Reserva pública en un comercio (el profesional sale del membershipId de la ruta,
- * el staff se resuelve solo). No requiere staffId.
+ * Reserva pública en un comercio. El profesional sale del membershipId de la ruta;
+ * el staff se resuelve solo. Teléfono obligatorio (clave de deduplicación primaria
+ * para clientes sin cuenta); email opcional pero mejora el reconocimiento si el
+ * número cambia en el futuro.
  */
-export class PublicBookDto extends ClientRefDto {
+export class PublicBookDto {
+  @ApiProperty({ example: 'Juan García' })
+  @IsString()
+  @IsNotEmpty()
+  @TitleCase()
+  fullName!: string;
+
+  @ApiProperty({ example: '2612465120', description: PHONE_DESCRIPTION })
+  @IsPhone()
+  phone!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
