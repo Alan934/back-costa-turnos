@@ -174,6 +174,17 @@ export class SubscriptionsService {
     const sub = await this.subscriptions.findOne({ where: { id: subscriptionId } });
     if (!sub) throw new NotFoundException('Suscripcion no encontrada');
 
+    // Idempotencia: MercadoPago reenvia el webhook varias veces por el mismo pago
+    // (reintentos + topics payment/merchant_order). Si ya registramos este
+    // providerPaymentId, no volvemos a acreditar (evita duplicar historial y apilar dias).
+    if (mercadopagoRef) {
+      const existing = await this.payments.findOne({ where: { mercadopagoRef } });
+      if (existing) {
+        this.logger.debug(`Pago MP ${mercadopagoRef} ya registrado; se ignora (idempotencia).`);
+        return;
+      }
+    }
+
     const periodStart = sub.currentPeriodEnd > new Date() ? sub.currentPeriodEnd : new Date();
     const periodEnd = new Date(periodStart.getTime() + PERIOD_DAYS * 86_400_000);
 
