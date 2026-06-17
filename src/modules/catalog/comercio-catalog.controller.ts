@@ -45,35 +45,10 @@ export class ComercioCatalogController {
     return this.catalog.createForMembership(membershipId, dto);
   }
 
-  @ApiOperation({ summary: 'Obtener un servicio por id (en este comercio)' })
-  @ApiResponse({ status: 200, type: Service })
-  @ApiResponse({ status: 404, description: 'No encontrado' })
-  @Get(':id')
-  get(@CurrentMembership() membershipId: string, @Param('id') id: string) {
-    return this.catalog.findByMembership(membershipId, id);
-  }
-
-  @ApiOperation({ summary: 'Actualizar un servicio (en este comercio)' })
-  @ApiResponse({ status: 200, type: Service })
-  @ApiResponse({ status: 404, description: 'No encontrado' })
-  @Patch(':id')
-  update(
-    @CurrentMembership() membershipId: string,
-    @Param('id') id: string,
-    @Body() dto: UpdateServiceDto,
-  ) {
-    return this.catalog.updateByMembership(membershipId, id, dto);
-  }
-
-  @ApiOperation({ summary: 'Desactivar un servicio (en este comercio)' })
-  @ApiResponse({ status: 200, type: Service })
-  @ApiResponse({ status: 404, description: 'No encontrado' })
-  @Delete(':id')
-  deactivate(@CurrentMembership() membershipId: string, @Param('id') id: string) {
-    return this.catalog.deactivateByMembership(membershipId, id);
-  }
-
   // ---- Reglas de combinación de servicios ----
+  // IMPORTANTE: estas rutas con segmento literal `combination-rules` deben ir ANTES
+  // que las rutas con `:id`/`:ruleId`, o NestJS las matchea como `:id` (y rompe al
+  // intentar castear "combination-rules" a uuid).
 
   @ApiOperation({ summary: 'Listar reglas de combinación de la membresía' })
   @ApiResponse({ status: 200, type: ServiceCombinationRule, isArray: true })
@@ -100,5 +75,33 @@ export class ComercioCatalogController {
   @Delete('combination-rules/:ruleId')
   deleteRule(@CurrentMembership() membershipId: string, @Param('ruleId') ruleId: string) {
     return this.combinationRules.delete(membershipId, ruleId);
+  }
+
+  @ApiOperation({ summary: 'Obtener un servicio por id (en este comercio)' })
+  @ApiResponse({ status: 200, type: Service })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get(':id')
+  get(@CurrentMembership() membershipId: string, @Param('id') id: string) {
+    return this.catalog.findByMembership(membershipId, id);
+  }
+
+  @ApiOperation({ summary: 'Actualizar un servicio (en este comercio)' })
+  @ApiResponse({ status: 200, type: Service })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Patch(':id')
+  update(
+    @CurrentMembership() membershipId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceDto,
+  ) {
+    return this.catalog.updateByMembership(membershipId, id, dto);
+  }
+
+  @ApiOperation({ summary: 'Desactivar un servicio (en este comercio)' })
+  @ApiResponse({ status: 200, type: Service })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Delete(':id')
+  deactivate(@CurrentMembership() membershipId: string, @Param('id') id: string) {
+    return this.catalog.deactivateByMembership(membershipId, id);
   }
 }

@@ -40,6 +40,7 @@ export class ServiceCombinationRule extends BaseEntity {
 
   @ApiProperty({ enum: CombinationRuleType, enumName: 'CombinationRuleType' })
   @Column({
+    name: 'rule_type',
     type: 'enum',
     enum: CombinationRuleType,
     enumName: 'combination_rule_type',
