@@ -27,6 +27,7 @@ import {
   ComercioPublicPageDto,
   PublicProfessionalDetailDto,
   PublicProfessionalDto,
+  PublicServiceDto,
 } from './dto/comercio-public-page.dto';
 import { PublicBookDto, PublicBookWithDepositDto } from './dto/appointment.dto';
 
@@ -60,8 +61,8 @@ export class PublicBookingController {
       professionalId: membership.professionalId,
       displayName: membership.professional?.businessName ?? 'Profesional',
       address: this.resolveAddress(membership, comercio),
-      bio: (settings.bio as string | undefined) ?? null,
-      phone: (settings.phone as string | undefined) ?? null,
+      bio: settings.bio ?? null,
+      phone: settings.phone ?? null,
     };
   }
 
@@ -108,6 +109,130 @@ export class PublicBookingController {
     };
   }
 
+  // ---- Catálogo del comercio + flujo Servicio → Profesional/"cualquiera" → Horario ----
+  @ApiOperation({
+    summary: 'Catálogo de servicios del comercio (con los profesionales que los ofrecen)',
+    description:
+      'Si un servicio tiene un solo profesional, el front muestra su nombre; si tiene varios, ' +
+      'habilita la opción "cualquiera". Solo servicios activos con al menos un profesional activo.',
+  })
+  @ApiResponse({ status: 200, type: PublicServiceDto, isArray: true })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get('services')
+  async services(@Param('slug') slug: string): Promise<PublicServiceDto[]> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const [list, members] = await Promise.all([
+      this.catalog.listPublicByComercio(comercio.id),
+      this.comercios.listActiveMembers(comercio.id),
+    ]);
+    const addressByMembership = new Map(
+      members.map((m) => [m.id, this.resolveAddress(m, comercio)]),
+    );
+    return list.map((s) => ({
+      serviceId: s.id,
+      name: s.name,
+      durationMinutes: s.durationMinutes,
+      priceCents: s.priceCents,
+      allowDeposit: s.allowDeposit,
+      allowFullPayment: s.allowFullPayment,
+      allowNoPayment: s.allowNoPayment,
+      depositAmountCents: s.depositAmountCents,
+      professionals: (s.assignedMemberships ?? []).map((a) => ({
+        membershipId: a.membershipId,
+        professionalId: a.professionalId,
+        displayName: a.displayName,
+        address: addressByMembership.get(a.membershipId) ?? comercio.address,
+      })),
+    }));
+  }
+
+  @ApiOperation({
+    summary: 'Slots de un servicio del comercio ("cualquiera"): unión deduplicada de profesionales',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Array de slots (startAt/endAt UTC ISO), sin profesional.',
+  })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get('services/:serviceId/slots')
+  async serviceSlots(
+    @Param('slug') slug: string,
+    @Param('serviceId') serviceId: string,
+    @Query('addonServiceIds') addonServiceIds: string | undefined,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const addonIds = addonServiceIds ? addonServiceIds.split(',').filter(Boolean) : [];
+    return this.availability.computeServiceSlots(comercio.id, serviceId, from, to, addonIds);
+  }
+
+  @ApiOperation({
+    summary: 'Disponibilidad por día de un servicio del comercio (agregada entre profesionales)',
+  })
+  @ApiResponse({ status: 200, type: DayAvailabilityDto, isArray: true })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Get('services/:serviceId/day-availability')
+  async serviceDayAvailability(
+    @Param('slug') slug: string,
+    @Param('serviceId') serviceId: string,
+    @Query('addonServiceIds') addonServiceIds: string | undefined,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ): Promise<DayAvailabilityDto[]> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const addonIds = addonServiceIds ? addonServiceIds.split(',').filter(Boolean) : [];
+    return this.availability.computeServiceDayAvailability(
+      comercio.id,
+      serviceId,
+      from,
+      to,
+      addonIds,
+    );
+  }
+
+  @ApiOperation({
+    summary:
+      'Reservar un servicio ("cualquiera"): el back elige el profesional (menor carga ese día)',
+  })
+  @ApiResponse({
+    status: 201,
+    type: Appointment,
+    description: 'Trae membershipId/professionalId asignado.',
+  })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
+  @Post('services/:serviceId/book')
+  async bookService(
+    @Param('slug') slug: string,
+    @Param('serviceId') serviceId: string,
+    @Body() dto: PublicBookDto,
+  ) {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    return this.appointments.bookForService(comercio.id, serviceId, dto, CreatedVia.ClientSelf);
+  }
+
+  @ApiOperation({
+    summary: 'Reservar un servicio con seña/pago ("cualquiera"): el back elige el profesional',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Objeto { appointment, payment, mpInitPoint? } (ver ruta con membershipId). El profesional ' +
+      'asignado queda en appointment.membershipId/professionalId.',
+  })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
+  @Post('services/:serviceId/book-with-deposit')
+  async bookServiceWithDeposit(
+    @Param('slug') slug: string,
+    @Param('serviceId') serviceId: string,
+    @Body() dto: PublicBookWithDepositDto,
+  ) {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    return this.appointments.bookWithDepositForService(comercio.id, serviceId, dto);
+  }
+
   // ---- Detalle de un profesional del comercio (servicios + ubicación) ----
   @ApiOperation({ summary: 'Servicios y ubicación de un profesional en el comercio' })
   @ApiResponse({ status: 200, type: PublicProfessionalDetailDto })
@@ -132,13 +257,17 @@ export class PublicBookingController {
 
   // ---- Reglas de combinación de un servicio (para el flujo de reserva público) ----
   @ApiOperation({
-    summary: 'Reglas de combinación para un servicio (add-ons habilitados, exclusiones, descuentos)',
+    summary:
+      'Reglas de combinación para un servicio (add-ons habilitados, exclusiones, descuentos)',
     description:
       'Devuelve las reglas donde sourceServiceId = serviceId. El frontend las usa para ' +
       'mostrar qué add-ons puede agregar el cliente, qué descuentos aplican y qué servicios ' +
       'no pueden combinarse.',
   })
-  @ApiResponse({ status: 200, description: 'Array de ServiceCombinationRule con targetService cargado' })
+  @ApiResponse({
+    status: 200,
+    description: 'Array de ServiceCombinationRule con targetService cargado',
+  })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Get('professionals/:membershipId/services/:serviceId/combination-rules')
   async combinationRulesForService(

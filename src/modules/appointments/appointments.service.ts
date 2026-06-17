@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, EntityManager, In, Repository } from 'typeorm';
+import { DateTime } from 'luxon';
 import { uuidv7 } from 'uuidv7';
 import {
   AppointmentStatus,
@@ -24,9 +25,13 @@ import {
 import { TenantContextService } from '@/common/context/tenant-context.service';
 import { PersonsService } from '@/modules/identity/persons.service';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { CatalogService } from '@/modules/catalog/catalog.service';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { ServiceCombinationRulesService } from '@/modules/catalog/service-combination-rules.service';
+import { AvailabilityService } from '@/modules/availability/availability.service';
+import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
@@ -77,6 +82,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly comercios: ComerciosService,
     private readonly paymentsService: PaymentsService,
     private readonly combinationRules: ServiceCombinationRulesService,
+    private readonly catalog: CatalogService,
+    private readonly availability: AvailabilityService,
+    private readonly subscriptions: SubscriptionsService,
   ) {}
 
   /** Se registra como confirmador para que el webhook de pagos cree el turno. */
@@ -124,16 +132,158 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     return this.bookWithDeposit(professionalId, { ...dto, staffId });
   }
 
-  /** comercio_id/membership_id donde ocurre el turno (a partir del servicio). */
-  private async resolveComercioContext(
+  // ---- Reservas "cualquiera" (servicio del comercio, el back elige profesional) ----
+
+  /**
+   * Reserva (sin pago) eligiendo automáticamente un profesional que ofrezca el
+   * servicio y esté libre en `startAt`: el de **menor carga ese día**. 409 si
+   * ninguno queda disponible. La respuesta indica quién quedó asignado.
+   */
+  async bookForService(
+    comercioId: string,
+    serviceId: string,
+    dto: { serviceId: string; startAt: string; addonServiceIds?: string[] } & ClientRefDto,
+    createdVia: CreatedVia,
+  ): Promise<Appointment> {
+    const candidates = await this.rankCandidates(
+      comercioId,
+      serviceId,
+      dto.startAt,
+      dto.addonServiceIds ?? [],
+    );
+    const bookDto = { ...dto, serviceId };
+    let lastError: unknown;
+    for (const membership of candidates) {
+      try {
+        const appointment = await this.bookForMembership(membership.id, bookDto, createdVia);
+        appointment.professionalDisplayName = membership.professional?.businessName;
+        return appointment;
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError instanceof ConflictException
+      ? lastError
+      : new ConflictException('Ningún profesional quedó disponible para ese horario.');
+  }
+
+  /** Reserva con seña/pago completo eligiendo profesional automáticamente (ver bookForService). */
+  async bookWithDepositForService(
+    comercioId: string,
+    serviceId: string,
+    dto: {
+      serviceId: string;
+      startAt: string;
+      method: PaymentMethod;
+      paymentOption?: PaymentOption;
+      addonServiceIds?: string[];
+    } & ClientRefDto,
+  ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
+    const candidates = await this.rankCandidates(
+      comercioId,
+      serviceId,
+      dto.startAt,
+      dto.addonServiceIds ?? [],
+    );
+    const bookDto = { ...dto, serviceId };
+    let lastError: unknown;
+    for (const membership of candidates) {
+      try {
+        const result = await this.bookWithDepositForMembership(membership.id, bookDto);
+        if (result.appointment) {
+          result.appointment.professionalDisplayName = membership.professional?.businessName;
+        }
+        return result;
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError instanceof ConflictException
+      ? lastError
+      : new ConflictException('Ningún profesional quedó disponible para ese horario.');
+  }
+
+  /**
+   * Profesionales (membresías activas, con professional cargado) que ofrecen el
+   * servicio, tienen acceso de escritura (suscripción) y un slot libre en `startAt`,
+   * ordenados por **menor carga ese día** (en la zona del comercio).
+   */
+  private async rankCandidates(
+    comercioId: string,
+    serviceId: string,
+    startAt: string,
+    addonServiceIds: string[],
+  ): Promise<Membership[]> {
+    const comercio = await this.comercios.getComercio(comercioId);
+    const memberships = (await this.catalog.activeAssignedMemberships(serviceId)).filter(
+      (m) => m.comercioId === comercioId,
+    );
+
+    const start = new Date(startAt);
+    const day = DateTime.fromJSDate(start, { zone: comercio.timezone }).toISODate();
+    if (!day) throw new BadRequestException('startAt inválido');
+
+    const scored: { membership: Membership; load: number }[] = [];
+    for (const membership of memberships) {
+      if (!(await this.hasWriteAccess(membership.professionalId))) continue;
+      const slots = await this.availability.computeSlotsByMembership(
+        membership.id,
+        serviceId,
+        day,
+        day,
+        addonServiceIds,
+      );
+      const free = slots.some((s) => new Date(s.startAt).getTime() === start.getTime());
+      if (!free) continue;
+      const load = await this.dayLoad(membership.professionalId, start, comercio.timezone);
+      scored.push({ membership, load });
+    }
+    scored.sort((a, b) => a.load - b.load);
+    return scored.map((s) => s.membership);
+  }
+
+  /** true si el profesional puede recibir reservas (sin suscripción vencida). */
+  private async hasWriteAccess(professionalId: string): Promise<boolean> {
+    const sub = await this.subscriptions.getByTenant(professionalId).catch(() => null);
+    return !sub || this.subscriptions.hasWriteAccess(sub);
+  }
+
+  /** Cantidad de turnos activos del profesional en el día (zona del comercio) de `instant`. */
+  private dayLoad(professionalId: string, instant: Date, zone: string): Promise<number> {
+    const day = DateTime.fromJSDate(instant, { zone });
+    const dayStart = day.startOf('day').toUTC().toJSDate();
+    const dayEnd = day.endOf('day').toUTC().toJSDate();
+    return this.appointments.count({
+      where: {
+        professionalId,
+        status: In(ACTIVE_STATUSES),
+        startAt: Between(dayStart, dayEnd),
+      },
+    });
+  }
+
+  /**
+   * Servicio activo (cualquier comercio) + la membresía activa del profesional en
+   * el comercio del servicio, validando que lo ofrezca. Es el contexto real del
+   * turno: comercio/membresía salen de quien reserva, no del creador del servicio.
+   */
+  private async resolveBookingMembership(
+    professionalId: string,
     service: Service,
-  ): Promise<{ comercioId: string; membershipId: string; minBookingHours: number }> {
-    const membership = await this.comercios.getMembershipById(service.membershipId);
-    return {
-      comercioId: membership.comercioId,
-      membershipId: membership.id,
-      minBookingHours: membership.minBookingHours,
-    };
+  ): Promise<Membership> {
+    const membership = await this.comercios.getActiveMembership(professionalId, service.comercioId);
+    if (!(await this.catalog.isAssigned(service.id, membership.id))) {
+      throw new NotFoundException('El profesional no ofrece este servicio');
+    }
+    return membership;
   }
 
   /**
@@ -191,10 +341,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       .execute();
   }
 
-  private async loadService(tenantId: string, serviceId: string): Promise<Service> {
-    const service = await this.services.findOne({
-      where: { id: serviceId, professionalId: tenantId, isActive: true },
-    });
+  private async loadService(serviceId: string): Promise<Service> {
+    const service = await this.services.findOne({ where: { id: serviceId, isActive: true } });
     if (!service) throw new NotFoundException('Servicio no encontrado o inactivo');
     return service;
   }
@@ -251,15 +399,19 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     dto: BookAppointmentDto,
     createdVia: CreatedVia,
   ): Promise<Appointment> {
-    const service = await this.loadService(tenantId, dto.serviceId);
+    const service = await this.loadService(dto.serviceId);
     if (!service.allowNoPayment) {
       throw new BadRequestException(
         'Este servicio requiere pago (seña o total) para reservar el turno',
       );
     }
 
+    const membership = await this.resolveBookingMembership(tenantId, service);
+    const comercioId = membership.comercioId;
+    const membershipId = membership.id;
+
     const addonPricings = await this.combinationRules.resolveAddons(
-      service.membershipId,
+      membershipId,
       service,
       dto.addonServiceIds ?? [],
     );
@@ -268,9 +420,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
-    const { comercioId, membershipId, minBookingHours } =
-      await this.resolveComercioContext(service);
-    this.assertLeadTime(startAt, minBookingHours);
+    this.assertLeadTime(startAt, membership.minBookingHours);
     const personId = await this.resolvePersonId(dto);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
@@ -333,7 +483,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     tenantId: string,
     dto: BookWithDepositDto,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
-    const service = await this.loadService(tenantId, dto.serviceId);
+    const service = await this.loadService(dto.serviceId);
     const option = dto.paymentOption ?? PaymentOption.Deposit;
 
     // El front ya lo bloquea por UX, pero el back rechaza igual: cobrar online
@@ -347,9 +497,13 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       );
     }
 
+    const membership = await this.resolveBookingMembership(tenantId, service);
+    const comercioId = membership.comercioId;
+    const membershipId = membership.id;
+
     // Resuelve y valida los add-ons antes de abrir la transacción.
     const addonPricings = await this.combinationRules.resolveAddons(
-      service.membershipId,
+      membershipId,
       service,
       dto.addonServiceIds ?? [],
     );
@@ -385,9 +539,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const totalDuration = service.durationMinutes + addonDuration;
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
-    const { comercioId, membershipId, minBookingHours } =
-      await this.resolveComercioContext(service);
-    this.assertLeadTime(startAt, minBookingHours);
+    this.assertLeadTime(startAt, membership.minBookingHours);
     const personId = await this.resolvePersonId(dto);
 
     const isCash = dto.method === PaymentMethod.Cash;
@@ -500,7 +652,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
             type: NotificationType.Deposit,
             payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
           });
-          return { appointment: appointment as Appointment | null, payment };
+          return { appointment: appointment, payment };
         }
 
         // MERCADOPAGO (F4): NO se crea el turno todavía. Solo el Payment Pending y

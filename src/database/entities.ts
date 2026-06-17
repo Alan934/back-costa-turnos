@@ -10,6 +10,7 @@ import { ProfessionalClient } from '@/modules/clients/entities/professional-clie
 import { FichaField } from '@/modules/clients/entities/ficha-field.entity';
 import { ClientNote } from '@/modules/clients/entities/client-note.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { ServiceMembership } from '@/modules/catalog/entities/service-membership.entity';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { ScheduleRule } from '@/modules/availability/entities/schedule-rule.entity';
 import { ScheduleRuleService } from '@/modules/availability/entities/schedule-rule-service.entity';
@@ -44,6 +45,7 @@ export const entities = [
   FichaField,
   ClientNote,
   Service,
+  ServiceMembership,
   ServiceCombinationRule,
   ScheduleRule,
   ScheduleRuleService,

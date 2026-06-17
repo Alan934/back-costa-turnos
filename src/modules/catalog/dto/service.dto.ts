@@ -1,5 +1,15 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 export class CreateServiceDto {
@@ -8,6 +18,18 @@ export class CreateServiceDto {
   @IsNotEmpty()
   @TitleCase()
   name!: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Membresías (profesionales) que ofrecen este servicio. Requerido (≥1) al crear desde el ' +
+      'comercio; en el alta del comercio-de-uno se asume el profesional logueado.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID(undefined, { each: true })
+  membershipIds?: string[];
 
   @ApiProperty({ example: 30, description: 'duracion en minutos' })
   @IsInt()

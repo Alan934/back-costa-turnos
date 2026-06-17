@@ -19,10 +19,18 @@ export class PublicProfessionalDto {
   })
   address!: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: 'Descripción/bio del profesional (publicPageSettings.bio).' })
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Descripción/bio del profesional (publicPageSettings.bio).',
+  })
   bio!: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, description: 'Teléfono/WhatsApp del profesional (publicPageSettings.phone).' })
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Teléfono/WhatsApp del profesional (publicPageSettings.phone).',
+  })
   phone!: string | null;
 }
 
@@ -55,6 +63,62 @@ export class ComercioPublicPageDto {
     description: 'Profesionales activos del comercio. Si hay uno solo, autoseleccionar.',
   })
   professionals!: PublicProfessionalDto[];
+}
+
+/** Un profesional que ofrece un servicio (en el catálogo del comercio). */
+export class PublicServiceProfessionalDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Membership id: usar para slots/booking por profesional.',
+  })
+  membershipId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  professionalId!: string;
+
+  @ApiProperty({ example: 'Lucía Pérez' })
+  displayName!: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Dirección donde atiende: la propia de la membresía o la del comercio (fallback).',
+  })
+  address!: string | null;
+}
+
+/**
+ * Respuesta de GET /r/:slug/services: catálogo del comercio. Si `professionals`
+ * tiene un solo elemento, el front muestra ese nombre; si hay varios, habilita la
+ * opción "cualquiera".
+ */
+export class PublicServiceDto {
+  @ApiProperty({ format: 'uuid' })
+  serviceId!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ type: Number })
+  durationMinutes!: number;
+
+  @ApiProperty({ type: Number })
+  priceCents!: number;
+
+  @ApiProperty({ type: Boolean })
+  allowDeposit!: boolean;
+
+  @ApiProperty({ type: Boolean })
+  allowFullPayment!: boolean;
+
+  @ApiProperty({ type: Boolean })
+  allowNoPayment!: boolean;
+
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  depositAmountCents!: number | null;
+
+  @ApiProperty({ type: PublicServiceProfessionalDto, isArray: true })
+  professionals!: PublicServiceProfessionalDto[];
 }
 
 /** Respuesta de GET /r/:slug/professionals/:membershipId: servicios + ubicación del pro. */

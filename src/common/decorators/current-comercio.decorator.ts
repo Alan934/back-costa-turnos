@@ -26,3 +26,13 @@ export const CurrentMembership = createParamDecorator(
     return request.membershipId;
   },
 );
+
+/**
+ * Igual que CurrentMembership pero devuelve `undefined` si no hay membresía (caso
+ * comercial puro bajo ComercioAccessGuard). El handler decide si es obligatoria.
+ */
+export const OptionalMembership = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): string | undefined => {
+    return ctx.switchToHttp().getRequest<AuthenticatedRequest>().membershipId;
+  },
+);

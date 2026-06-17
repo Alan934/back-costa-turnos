@@ -4,6 +4,7 @@ import { Between, In, Repository } from 'typeorm';
 import { DateTime, Interval } from 'luxon';
 import { AppointmentStatus, ScheduleRuleKind } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { CatalogService } from '@/modules/catalog/catalog.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
@@ -46,6 +47,7 @@ export class AvailabilityService {
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
     private readonly comercios: ComerciosService,
+    private readonly catalog: CatalogService,
   ) {}
 
   // ---- Helpers de mapeo regla<->servicio ----
@@ -159,11 +161,9 @@ export class AvailabilityService {
   ): Promise<string[]> {
     if (!serviceIds || serviceIds.length === 0) return [];
     const unique = [...new Set(serviceIds)];
-    const found = await this.services.find({
-      where: { id: In(unique), membershipId },
-    });
-    if (found.length !== unique.length) {
-      throw new BadRequestException('Algún servicio no pertenece a esta membresía');
+    const assigned = await this.catalog.filterAssignedServiceIds(membershipId, unique);
+    if (assigned.length !== unique.length) {
+      throw new BadRequestException('Algún servicio no lo ofrece este profesional');
     }
     return unique;
   }
@@ -291,6 +291,84 @@ export class AvailabilityService {
     );
   }
 
+  // ---- Agregado a NIVEL SERVICIO del comercio ("cualquiera") ----
+
+  /**
+   * Slots de un servicio del comercio combinando TODOS los profesionales activos
+   * que lo ofrecen, **deduplicados por `startAt`**. El slot no lleva profesional
+   * (lo resuelve el booking).
+   */
+  async computeServiceSlots(
+    comercioId: string,
+    serviceId: string,
+    from: string,
+    to: string,
+    addonServiceIds: string[] = [],
+  ): Promise<AvailableSlot[]> {
+    const memberships = (await this.catalog.activeAssignedMemberships(serviceId)).filter(
+      (m) => m.comercioId === comercioId,
+    );
+    const byStart = new Map<number, AvailableSlot>();
+    for (const m of memberships) {
+      const slots = await this.computeSlotsByMembership(m.id, serviceId, from, to, addonServiceIds);
+      for (const slot of slots) {
+        const key = new Date(slot.startAt).getTime();
+        if (!byStart.has(key)) byStart.set(key, slot);
+      }
+    }
+    return [...byStart.values()].sort(
+      (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime(),
+    );
+  }
+
+  /**
+   * Disponibilidad por día de un servicio del comercio: un día es `bookable` si al
+   * menos un profesional que lo ofrece tiene cupo. Combina las respuestas por
+   * membresía (status: available si alguno; si no, precedencia full > time_off > closed).
+   */
+  async computeServiceDayAvailability(
+    comercioId: string,
+    serviceId: string,
+    from: string,
+    to: string,
+    addonServiceIds: string[] = [],
+  ): Promise<DayAvailabilityDto[]> {
+    const memberships = (await this.catalog.activeAssignedMemberships(serviceId)).filter(
+      (m) => m.comercioId === comercioId,
+    );
+    const byDate = new Map<string, DayAvailabilityDto>();
+    for (const m of memberships) {
+      const days = await this.computeDayAvailabilityByMembership(
+        m.id,
+        serviceId,
+        from,
+        to,
+        addonServiceIds,
+      );
+      for (const day of days) {
+        const existing = byDate.get(day.date);
+        byDate.set(day.date, existing ? this.mergeDayAvailability(existing, day) : { ...day });
+      }
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /** Combina dos estados de un día: bookable = OR; si no, full > time_off > closed. */
+  private mergeDayAvailability(a: DayAvailabilityDto, b: DayAvailabilityDto): DayAvailabilityDto {
+    if (a.bookable || b.bookable) {
+      return {
+        date: a.date,
+        status: DayAvailabilityStatus.Available,
+        reason: null,
+        bookable: true,
+      };
+    }
+    const rank = (s: DayAvailabilityStatus): number =>
+      s === DayAvailabilityStatus.Full ? 3 : s === DayAvailabilityStatus.TimeOff ? 2 : 1;
+    const winner = rank(b.status) > rank(a.status) ? b : a;
+    return { date: a.date, status: winner.status, reason: winner.reason, bookable: false };
+  }
+
   /**
    * Carga y prepara todo lo necesario para calcular slots de una membresía+servicio:
    * reglas por día (filtradas por el servicio), time_off y turnos ocupados del
@@ -318,18 +396,26 @@ export class AvailabilityService {
     const membership = await this.comercios.getMembershipById(membershipId);
     const comercio = await this.comercios.getComercio(membership.comercioId);
 
-    const service = await this.services.findOne({ where: { id: serviceId, membershipId } });
-    if (!service) throw new NotFoundException('Servicio no encontrado');
+    const service = await this.services.findOne({ where: { id: serviceId } });
+    if (!service || !(await this.catalog.isAssigned(serviceId, membershipId))) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
 
     const zone = comercio.timezone;
     let duration = service.durationMinutes;
 
     if (addonServiceIds.length > 0) {
-      const addonServices = await this.services.find({
-        where: { id: In(addonServiceIds), membershipId },
-        select: ['id', 'durationMinutes'],
-      });
-      duration += addonServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+      const assignedAddonIds = await this.catalog.filterAssignedServiceIds(
+        membershipId,
+        addonServiceIds,
+      );
+      if (assignedAddonIds.length > 0) {
+        const addonServices = await this.services.find({
+          where: { id: In(assignedAddonIds) },
+          select: ['id', 'durationMinutes'],
+        });
+        duration += addonServices.reduce((sum, s) => sum + s.durationMinutes, 0);
+      }
     }
     const rangeStart = DateTime.fromISO(from, { zone }).startOf('day');
     const rangeEnd = DateTime.fromISO(to, { zone }).endOf('day');
@@ -406,7 +492,17 @@ export class AvailabilityService {
     busy: Appointment[];
     minBookingHours?: number;
   }): AvailableSlot[] {
-    const { rangeStart, rangeEnd, duration, targetServiceId, capacity, workByDay, breaksByDay, timeOffs, busy } = args;
+    const {
+      rangeStart,
+      rangeEnd,
+      duration,
+      targetServiceId,
+      capacity,
+      workByDay,
+      breaksByDay,
+      timeOffs,
+      busy,
+    } = args;
     const timeOffIntervals: Interval[] = timeOffs.map((t) =>
       Interval.fromDateTimes(DateTime.fromJSDate(t.startAt), DateTime.fromJSDate(t.endAt)),
     );
@@ -466,9 +562,7 @@ export class AvailabilityService {
           }
 
           const overlapsOccupied =
-            timeOffBlocked ||
-            otherServiceBlocked ||
-            sameServiceCount >= capacity;
+            timeOffBlocked || otherServiceBlocked || sameServiceCount >= capacity;
           const tooSoon = slotStart < earliestStart;
 
           if (!overlapsBreak && !overlapsOccupied && !tooSoon) {

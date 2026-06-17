@@ -2,29 +2,59 @@ import { BadRequestException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { CatalogService } from './catalog.service';
 import { Service } from './entities/service.entity';
+import { ServiceMembership } from './entities/service-membership.entity';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 
 describe('CatalogService (opciones de pago)', () => {
   let service: CatalogService;
-  let repo: { create: jest.Mock; save: jest.Mock };
-  let comercios: { getMembershipById: jest.Mock; hasMpConnected: jest.Mock };
+  let repo: { create: jest.Mock; save: jest.Mock; findOne: jest.Mock };
+  let serviceMemberships: { create: jest.Mock; save: jest.Mock; find: jest.Mock };
+  let comercios: {
+    getMembershipById: jest.Mock;
+    getActiveMembershipsInComercio: jest.Mock;
+  };
 
   const MEMBERSHIP_ID = 'membership-1';
+  const COMERCIO_ID = 'com-1';
+  let savedService: Record<string, unknown>;
+  let mpConnected: boolean;
 
   beforeEach(() => {
+    mpConnected = true;
+    savedService = {};
     repo = {
+      create: jest.fn((x: Record<string, unknown>) => x),
+      save: jest.fn((x: Record<string, unknown>) => {
+        savedService = { id: 'svc-1', ...x };
+        return Promise.resolve(savedService);
+      }),
+      // getForComercio (lo llama createForComercio al final) relee el servicio.
+      findOne: jest.fn(() => Promise.resolve(savedService)),
+    };
+    serviceMemberships = {
       create: jest.fn((x: unknown) => x),
       save: jest.fn((x: unknown) => Promise.resolve(x)),
+      // attachAssigned: sin filas => assignedMemberships vacío (no relevante para estos tests).
+      find: jest.fn(() => Promise.resolve([])),
     };
     comercios = {
       getMembershipById: jest.fn(() =>
-        Promise.resolve({ id: MEMBERSHIP_ID, professionalId: 'pro-1', comercioId: 'com-1' }),
+        Promise.resolve({ id: MEMBERSHIP_ID, professionalId: 'pro-1', comercioId: COMERCIO_ID }),
       ),
-      // Por defecto el profesional tiene MP conectado (las opciones pagas se permiten).
-      hasMpConnected: jest.fn(() => Promise.resolve(true)),
+      getActiveMembershipsInComercio: jest.fn(() =>
+        Promise.resolve([
+          {
+            id: MEMBERSHIP_ID,
+            professionalId: 'pro-1',
+            comercioId: COMERCIO_ID,
+            professional: { mpConnectedAt: mpConnected ? new Date() : null },
+          },
+        ]),
+      ),
     };
     service = new CatalogService(
       repo as unknown as Repository<Service>,
+      serviceMemberships as unknown as Repository<ServiceMembership>,
       comercios as unknown as ComerciosService,
     );
   });
@@ -49,7 +79,9 @@ describe('CatalogService (opciones de pago)', () => {
     expect(result.name).toBe('Corte');
     expect(result.allowNoPayment).toBe(true);
     expect(result.membershipId).toBe(MEMBERSHIP_ID);
+    expect(result.comercioId).toBe(COMERCIO_ID);
     expect(repo.save).toHaveBeenCalled();
+    expect(serviceMemberships.save).toHaveBeenCalled();
   });
 
   it('acepta combinación seña + pago completo + sin pago', async () => {
@@ -78,8 +110,8 @@ describe('CatalogService (opciones de pago)', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('rechaza seña/pago completo si el profesional no tiene MP conectado', async () => {
-    comercios.hasMpConnected.mockResolvedValue(false);
+  it('rechaza seña/pago completo si algún profesional asignado no tiene MP conectado', async () => {
+    mpConnected = false;
     await expect(
       service.createForMembership(MEMBERSHIP_ID, {
         name: 'Corte premium',
@@ -91,13 +123,12 @@ describe('CatalogService (opciones de pago)', () => {
   });
 
   it('permite solo sin pago aunque no tenga MP conectado', async () => {
-    comercios.hasMpConnected.mockResolvedValue(false);
+    mpConnected = false;
     const result = await service.createForMembership(MEMBERSHIP_ID, {
       name: 'Corte',
       durationMinutes: 30,
       priceCents: 50000,
     });
     expect(result.allowNoPayment).toBe(true);
-    expect(comercios.hasMpConnected).not.toHaveBeenCalled();
   });
 });

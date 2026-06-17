@@ -1,8 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { MembershipStatus } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
-import { Service } from './entities/service.entity';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { Service, ServiceAssignedMembership } from './entities/service.entity';
+import { ServiceMembership } from './entities/service-membership.entity';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
 
 interface PaymentFlags {
@@ -17,6 +20,8 @@ export class CatalogService {
   constructor(
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    @InjectRepository(ServiceMembership)
+    private readonly serviceMemberships: Repository<ServiceMembership>,
     private readonly comercios: ComerciosService,
   ) {}
 
@@ -33,74 +38,241 @@ export class CatalogService {
   }
 
   /**
-   * Las opciones de cobro online (seña / pago completo) requieren que el
-   * profesional tenga su cuenta de MercadoPago conectada. El front ya lo valida
-   * por UX, pero el back lo rechaza igual (el front no es garantía de seguridad).
+   * Cobro online (seña / pago completo): requiere que TODOS los profesionales
+   * asignados tengan su MercadoPago conectado (en "cualquiera" cualquiera puede
+   * quedar asignado, así que todos deben poder cobrar). Las membresías deben venir
+   * con su `professional` cargado.
    */
-  private async assertMpConnectedForPaidOptions(
-    professionalId: string,
-    f: PaymentFlags,
-  ): Promise<void> {
+  private assertAllMembershipsMpConnected(memberships: Membership[], f: PaymentFlags): void {
     if (!f.allowDeposit && !f.allowFullPayment) return;
-    if (!(await this.comercios.hasMpConnected(professionalId))) {
+    const missing = memberships.filter((m) => !m.professional?.mpConnectedAt);
+    if (missing.length > 0) {
       throw new BadRequestException(
-        'El profesional debe conectar su cuenta de MercadoPago para habilitar seña o pago completo',
+        'Para habilitar seña o pago completo, todos los profesionales asignados deben tener su cuenta de MercadoPago conectada',
       );
     }
   }
 
-  // ---- Por membresía (profesional-en-comercio): servicios/precios de ese comercio ----
-  listActiveByMembership(membershipId: string): Promise<Service[]> {
-    return this.services.find({
-      where: { membershipId, isActive: true },
-      order: { name: 'ASC' },
-    });
+  // ---- Helpers de asignación (servicio<->membresía) ----
+
+  /** true si el servicio está asignado a la membresía (vía service_membership). */
+  async isAssigned(serviceId: string, membershipId: string): Promise<boolean> {
+    const count = await this.serviceMemberships.count({ where: { serviceId, membershipId } });
+    return count > 0;
   }
 
-  listAllByMembership(membershipId: string): Promise<Service[]> {
-    return this.services.find({
-      where: { membershipId },
-      order: { name: 'ASC' },
+  /** Subconjunto de serviceIds que están asignados a la membresía. */
+  async filterAssignedServiceIds(membershipId: string, serviceIds: string[]): Promise<string[]> {
+    if (serviceIds.length === 0) return [];
+    const rows = await this.serviceMemberships.find({
+      where: { membershipId, serviceId: In([...new Set(serviceIds)]) },
+      select: { serviceId: true },
     });
+    return rows.map((r) => r.serviceId);
   }
 
-  async findByMembership(membershipId: string, id: string): Promise<Service> {
-    const service = await this.services.findOne({ where: { id, membershipId } });
+  /**
+   * Membresías ACTIVAS que ofrecen el servicio (con su professional cargado),
+   * ordenadas por antigüedad de la membresía (orden estable para asignación).
+   */
+  async activeAssignedMemberships(serviceId: string): Promise<Membership[]> {
+    const rows = await this.serviceMemberships.find({
+      where: { serviceId },
+      relations: { membership: { professional: true } },
+    });
+    return rows
+      .map((r) => r.membership)
+      .filter((m): m is Membership => !!m && m.status === MembershipStatus.Active)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  /** Rellena `assignedMemberships` (membresías activas) en los servicios dados. */
+  private async attachAssigned(servicesList: Service[]): Promise<Service[]> {
+    if (servicesList.length === 0) return servicesList;
+    const ids = servicesList.map((s) => s.id);
+    const rows = await this.serviceMemberships.find({
+      where: { serviceId: In(ids) },
+      relations: { membership: { professional: true } },
+    });
+    const map = new Map<string, ServiceAssignedMembership[]>();
+    for (const row of rows) {
+      const m = row.membership;
+      if (!m || m.status !== MembershipStatus.Active) continue;
+      const list = map.get(row.serviceId) ?? [];
+      list.push({
+        membershipId: m.id,
+        professionalId: m.professionalId,
+        displayName: m.professional?.businessName ?? 'Profesional',
+      });
+      map.set(row.serviceId, list);
+    }
+    for (const s of servicesList) s.assignedMemberships = map.get(s.id) ?? [];
+    return servicesList;
+  }
+
+  private async assignMemberships(serviceId: string, membershipIds: string[]): Promise<void> {
+    if (membershipIds.length === 0) return;
+    await this.serviceMemberships.save(
+      membershipIds.map((membershipId) =>
+        this.serviceMemberships.create({ serviceId, membershipId }),
+      ),
+    );
+  }
+
+  // ---- A NIVEL COMERCIO: servicios del comercio asignados a N profesionales ----
+
+  /** Servicios del comercio (todos) con sus membresías asignadas. */
+  async listByComercio(comercioId: string): Promise<Service[]> {
+    const list = await this.services.find({ where: { comercioId }, order: { name: 'ASC' } });
+    return this.attachAssigned(list);
+  }
+
+  /** Servicios ACTIVOS del comercio con ≥1 profesional activo asignado (página pública). */
+  async listPublicByComercio(comercioId: string): Promise<Service[]> {
+    const list = await this.services.find({
+      where: { comercioId, isActive: true },
+      order: { name: 'ASC' },
+    });
+    const withAssigned = await this.attachAssigned(list);
+    return withAssigned.filter((s) => (s.assignedMemberships?.length ?? 0) > 0);
+  }
+
+  async getForComercio(comercioId: string, id: string): Promise<Service> {
+    const service = await this.services.findOne({ where: { id, comercioId } });
     if (!service) throw new NotFoundException('Servicio no encontrado');
-    return service;
+    return (await this.attachAssigned([service]))[0];
   }
 
-  async createForMembership(membershipId: string, dto: CreateServiceDto): Promise<Service> {
-    // La membresía nos da el professional dueño (para el tenanting legacy).
-    const membership = await this.comercios.getMembershipById(membershipId);
+  async createForComercio(comercioId: string, dto: CreateServiceDto): Promise<Service> {
+    const membershipIds = [...new Set(dto.membershipIds ?? [])];
+    if (membershipIds.length === 0) {
+      throw new BadRequestException('Asigná al menos un profesional al servicio');
+    }
+    // Valida que todas pertenezcan al comercio y estén activas (orden = dto).
+    const memberships = await this.comercios.getActiveMembershipsInComercio(
+      comercioId,
+      membershipIds,
+    );
 
     const allowDeposit = dto.allowDeposit ?? false;
     const allowFullPayment = dto.allowFullPayment ?? false;
     const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment);
     const depositAmountCents = dto.depositAmountCents ?? null;
+    const flags = { allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents };
+    this.assertPaymentOptions(flags);
+    this.assertAllMembershipsMpConnected(memberships, flags);
 
-    this.assertPaymentOptions({ allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents });
-    await this.assertMpConnectedForPaidOptions(membership.professionalId, {
-      allowDeposit,
-      allowFullPayment,
-      allowNoPayment,
-      depositAmountCents,
-    });
+    const creator = memberships[0];
+    const service = await this.services.save(
+      this.services.create({
+        professionalId: creator.professionalId,
+        comercioId,
+        membershipId: creator.id,
+        name: dto.name,
+        durationMinutes: dto.durationMinutes,
+        priceCents: dto.priceCents,
+        allowDeposit,
+        allowFullPayment,
+        allowNoPayment,
+        depositAmountCents,
+        capacity: dto.capacity ?? 1,
+        isActive: true,
+      }),
+    );
+    await this.assignMemberships(
+      service.id,
+      memberships.map((m) => m.id),
+    );
+    return this.getForComercio(comercioId, service.id);
+  }
 
-    const service = this.services.create({
-      professionalId: membership.professionalId,
-      membershipId,
-      name: dto.name,
-      durationMinutes: dto.durationMinutes,
-      priceCents: dto.priceCents,
-      allowDeposit,
-      allowFullPayment,
-      allowNoPayment,
-      depositAmountCents,
-      capacity: dto.capacity ?? 1,
-      isActive: true,
+  async updateForComercio(comercioId: string, id: string, dto: UpdateServiceDto): Promise<Service> {
+    const service = await this.services.findOne({ where: { id, comercioId } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+
+    // Set de membresías resultante (nuevo si viene membershipIds; si no, el actual).
+    let newMemberships: Membership[] | null = null;
+    if (dto.membershipIds !== undefined) {
+      const ids = [...new Set(dto.membershipIds)];
+      if (ids.length === 0) {
+        throw new BadRequestException('Asigná al menos un profesional al servicio');
+      }
+      newMemberships = await this.comercios.getActiveMembershipsInComercio(comercioId, ids);
+    }
+
+    const flags: PaymentFlags = {
+      allowDeposit: dto.allowDeposit ?? service.allowDeposit,
+      allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
+      allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
+      depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
+    };
+    this.assertPaymentOptions(flags);
+    const assignedForMp = newMemberships ?? (await this.activeAssignedMemberships(id));
+    this.assertAllMembershipsMpConnected(assignedForMp, flags);
+
+    const { membershipIds: _ignored, ...scalar } = dto;
+    Object.assign(service, scalar);
+
+    if (newMemberships) {
+      await this.serviceMemberships.delete({ serviceId: id });
+      await this.assignMemberships(
+        id,
+        newMemberships.map((m) => m.id),
+      );
+      // El creador/legacy debe ser uno de los asignados.
+      service.membershipId = newMemberships[0].id;
+      service.professionalId = newMemberships[0].professionalId;
+    }
+    await this.services.save(service);
+    return this.getForComercio(comercioId, id);
+  }
+
+  async deactivateForComercio(comercioId: string, id: string): Promise<Service> {
+    const service = await this.services.findOne({ where: { id, comercioId } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+    service.isActive = false;
+    await this.services.save(service);
+    return this.getForComercio(comercioId, id);
+  }
+
+  // ---- Por membresía (profesional-en-comercio): lectura de servicios ofrecidos ----
+  async listActiveByMembership(membershipId: string): Promise<Service[]> {
+    const rows = await this.serviceMemberships.find({
+      where: { membershipId },
+      relations: { service: true },
     });
-    return this.services.save(service);
+    return rows
+      .map((r) => r.service)
+      .filter((s): s is Service => !!s && s.isActive)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  listAllByMembership(membershipId: string): Promise<Service[]> {
+    return this.serviceMemberships
+      .find({ where: { membershipId }, relations: { service: true } })
+      .then((rows) =>
+        rows
+          .map((r) => r.service)
+          .filter((s): s is Service => !!s)
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+  }
+
+  async findByMembership(membershipId: string, id: string): Promise<Service> {
+    const service = await this.services.findOne({ where: { id } });
+    if (!service || !(await this.isAssigned(id, membershipId))) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
+    return service;
+  }
+
+  /**
+   * Compat: crea un servicio "de" una membresía (comercio-de-uno o creación rápida
+   * del profesional). Delega en createForComercio asignándolo a esa membresía.
+   */
+  async createForMembership(membershipId: string, dto: CreateServiceDto): Promise<Service> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    return this.createForComercio(membership.comercioId, { ...dto, membershipIds: [membershipId] });
   }
 
   async updateByMembership(
@@ -109,22 +281,14 @@ export class CatalogService {
     dto: UpdateServiceDto,
   ): Promise<Service> {
     const service = await this.findByMembership(membershipId, id);
-    const flags: PaymentFlags = {
-      allowDeposit: dto.allowDeposit ?? service.allowDeposit,
-      allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
-      allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
-      depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
-    };
-    this.assertPaymentOptions(flags);
-    await this.assertMpConnectedForPaidOptions(service.professionalId, flags);
-    Object.assign(service, dto);
-    return this.services.save(service);
+    // Un miembro no puede reasignar membresías por esta vía (eso es del comercio).
+    const { membershipIds: _ignored, ...scalar } = dto;
+    return this.updateForComercio(service.comercioId, id, scalar);
   }
 
   async deactivateByMembership(membershipId: string, id: string): Promise<Service> {
     const service = await this.findByMembership(membershipId, id);
-    service.isActive = false;
-    return this.services.save(service);
+    return this.deactivateForComercio(service.comercioId, id);
   }
 
   // ---- Compat por professional (comercio-de-uno): resuelve la membresía personal ----

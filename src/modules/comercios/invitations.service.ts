@@ -19,15 +19,14 @@ export class InvitationsService {
     private readonly mailer: MailerService,
   ) {}
 
-  /** El comercio invita a un profesional por email. */
+  /**
+   * El comercio invita a un profesional por email. No exige que el email ya tenga
+   * cuenta de profesional: la invitación queda pendiente y se valida que sea
+   * profesional al ACEPTARLA. Así el comercio puede invitar a alguien que todavía
+   * no se registró (recibe el mail y, tras registrarse, la acepta).
+   */
   async invite(comercioId: string, email: string): Promise<ComercioInvitation> {
     const comercio = await this.comercios.getComercio(comercioId);
-
-    // El profesional debe existir (cuenta de profesional con ese email).
-    const professional = await this.comercios.findProfessionalByEmail(email);
-    if (!professional) {
-      throw new NotFoundException('No existe un profesional con ese email');
-    }
 
     const token = randomBytes(24).toString('base64url');
     const invitation = await this.invitations.save(

@@ -54,6 +54,41 @@ export class RegisterProfessionalDto extends RegisterDto {
   address?: string;
 }
 
+/** Auto-registro de COMERCIAL (dueño/gestor de un comercio): cuenta + comercio. */
+export class RegisterComercialDto {
+  @ApiProperty({ example: 'comercial@peluqueria.com' })
+  @IsEmail()
+  email!: string;
+
+  @ApiProperty({ example: 'super-secreta-123', minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  password!: string;
+
+  @ApiProperty({ example: 'Peluquería Centro', description: 'nombre visible del comercio' })
+  @IsString()
+  @IsNotEmpty()
+  @TitleCase()
+  comercioName!: string;
+
+  @ApiProperty({ example: 'peluqueria-centro', description: 'slug único para /r/:slug' })
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug debe ser kebab-case (a-z, 0-9, guiones)',
+  })
+  slug!: string;
+
+  @ApiPropertyOptional({ example: 'Belgrano 245, Costa de Araujo, Mendoza' })
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @ApiPropertyOptional({ example: 'America/Argentina/Buenos_Aires' })
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+}
+
 export class LoginDto {
   @ApiProperty({ example: 'dueno@peluqueria.com' })
   @IsEmail()

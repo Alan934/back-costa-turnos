@@ -22,6 +22,7 @@ import { VerificationTokenService } from './verification-token.service';
 import {
   ClaimAccountDto,
   LoginDto,
+  RegisterComercialDto,
   RegisterDto,
   RegisterProfessionalDto,
   ResetPasswordDto,
@@ -189,6 +190,18 @@ export class AuthService {
       address: dto.address,
     });
 
+    return this.issueAndPersist(account);
+  }
+
+  /**
+   * Auto-registro de COMERCIAL: crea la cuenta + su comercio (no personal). NO crea
+   * profesional ni suscripción (la facturación es por profesional). El token trae el
+   * rol `comercial` y el `comercioIds` del comercio recién creado.
+   */
+  async registerComercial(dto: RegisterComercialDto): Promise<IssuedTokens> {
+    const comercio = await this.comercios.createComercialWithComercio(dto);
+    const account = await this.accounts.findById(comercio.accountId!);
+    if (!account) throw new BadRequestException('No se pudo crear la cuenta del comercial');
     return this.issueAndPersist(account);
   }
 

@@ -1,17 +1,34 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { ServiceMembership } from './service-membership.entity';
+
+/** Asignación de un servicio a una membresía (resumida para la página/gestión). */
+export class ServiceAssignedMembership {
+  @ApiProperty({ format: 'uuid' })
+  membershipId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  professionalId!: string;
+
+  @ApiProperty({ example: 'Lucía Pérez' })
+  displayName!: string;
+}
 
 /**
  * Catalogo de servicios. Define duracion (bloqueo de calendario) y politica de sena.
- * Pertenece a una membresia (profesional-en-comercio): cada profesional define
- * sus servicios/precios por comercio. `professional_id` se mantiene (dueño/worker).
+ * El servicio pertenece al COMERCIO (`comercio_id`) y se asigna a una o varias
+ * membresias (profesional-en-comercio) via `service_membership` (N:M); precio y
+ * duracion son uniformes. `membership_id`/`professional_id` se conservan como
+ * creador/legacy (el primer profesional asignado) para compat de tenanting.
  */
 @Entity('service')
 @Index('idx_service_tenant', ['professionalId'])
 @Index('idx_service_membership', ['membershipId'])
+@Index('idx_service_comercio', ['comercioId'])
 export class Service extends BaseEntity {
   @ApiProperty({ format: 'uuid' })
   @Column({ name: 'professional_id', type: 'uuid' })
@@ -21,7 +38,16 @@ export class Service extends BaseEntity {
   @JoinColumn({ name: 'professional_id' })
   professional?: Professional;
 
-  /** Membresia (profesional-en-comercio) a la que pertenece este servicio. */
+  /** Comercio dueño del servicio. */
+  @ApiProperty({ format: 'uuid' })
+  @Column({ name: 'comercio_id', type: 'uuid' })
+  comercioId!: string;
+
+  @ManyToOne(() => Comercio, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'comercio_id' })
+  comercio?: Comercio;
+
+  /** Membresia creadora/legacy (primer profesional asignado). */
   @ApiProperty({ format: 'uuid' })
   @Column({ name: 'membership_id', type: 'uuid' })
   membershipId!: string;
@@ -29,6 +55,9 @@ export class Service extends BaseEntity {
   @ManyToOne(() => Membership, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'membership_id' })
   membership?: Membership;
+
+  @OneToMany(() => ServiceMembership, (sm) => sm.service)
+  serviceMemberships?: ServiceMembership[];
 
   @ApiProperty()
   @Column({ type: 'text' })
@@ -75,4 +104,11 @@ export class Service extends BaseEntity {
   @ApiProperty({ type: Boolean })
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
+
+  /**
+   * Campo derivado (no persistido): profesionales (membresias activas) que ofrecen
+   * este servicio. Lo rellena CatalogService en las lecturas a nivel comercio.
+   */
+  @ApiPropertyOptional({ type: ServiceAssignedMembership, isArray: true })
+  assignedMemberships?: ServiceAssignedMembership[];
 }

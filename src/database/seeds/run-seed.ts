@@ -7,6 +7,7 @@ import { Person } from '@/modules/identity/entities/person.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
+import { ServiceMembership } from '@/modules/catalog/entities/service-membership.entity';
 import { ScheduleRule } from '@/modules/availability/entities/schedule-rule.entity';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
@@ -37,16 +38,22 @@ async function ensureMembershipCatalog(
 ): Promise<void> {
   const existing = await manager.count(Service, { where: { membershipId: membership.id } });
   if (existing === 0) {
-    await manager.save(
+    const created = await manager.save(
       services.map((s) =>
         manager.create(Service, {
           professionalId: membership.professionalId,
+          comercioId: membership.comercioId,
           membershipId: membership.id,
           name: s.name,
           durationMinutes: s.durationMinutes,
           priceCents: s.priceCents,
           allowNoPayment: true,
         }),
+      ),
+    );
+    await manager.save(
+      created.map((svc) =>
+        manager.create(ServiceMembership, { serviceId: svc.id, membershipId: membership.id }),
       ),
     );
   }
@@ -234,10 +241,11 @@ async function seed(): Promise<void> {
     where: { membershipId: personalMembership.id },
   });
   if (serviceCount === 0) {
-    await manager.save([
+    const createdServices = await manager.save([
       // Corte: permite las 3 opciones (con seña, pago completo y sin pago).
       manager.create(Service, {
         professionalId: professional.id,
+        comercioId: personalMembership.comercioId,
         membershipId: personalMembership.id,
         name: 'Corte de pelo',
         durationMinutes: 30,
@@ -250,6 +258,7 @@ async function seed(): Promise<void> {
       // Color: exige pago (seña o total), no permite reservar sin pagar.
       manager.create(Service, {
         professionalId: professional.id,
+        comercioId: personalMembership.comercioId,
         membershipId: personalMembership.id,
         name: 'Color',
         durationMinutes: 90,
@@ -260,6 +269,14 @@ async function seed(): Promise<void> {
         depositAmountCents: 500_000,
       }),
     ]);
+    await manager.save(
+      createdServices.map((svc) =>
+        manager.create(ServiceMembership, {
+          serviceId: svc.id,
+          membershipId: personalMembership.id,
+        }),
+      ),
+    );
     console.log('Servicios creados: Corte (todas las opciones), Color (con pago)');
   }
 

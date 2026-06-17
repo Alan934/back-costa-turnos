@@ -10,7 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ComercioOwnerGuard } from '@/common/guards/comercio-owner.guard';
 import { ComercioMembershipGuard } from '@/common/guards/comercio-membership.guard';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
@@ -59,12 +59,10 @@ export class ComerciosController {
   })
   @ApiResponse({ status: 200, type: Membership })
   @ApiResponse({ status: 403, description: 'No tenés membresía activa en este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioMembershipGuard)
   @Patch(':comercioId/membership')
-  updateMyMembership(
-    @CurrentMembership() membershipId: string,
-    @Body() dto: UpdateMembershipDto,
-  ) {
+  updateMyMembership(@CurrentMembership() membershipId: string, @Body() dto: UpdateMembershipDto) {
     return this.comercios.updateMembership(membershipId, dto);
   }
 
@@ -79,6 +77,7 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Obtener un comercio' })
   @ApiResponse({ status: 200, type: Comercio })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @Get(':comercioId')
   get(@CurrentComercio() comercioId: string) {
@@ -88,6 +87,7 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Actualizar un comercio' })
   @ApiResponse({ status: 200, type: Comercio })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @Patch(':comercioId')
   update(@CurrentComercio() comercioId: string, @Body() dto: UpdateComercioDto) {
@@ -97,16 +97,38 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Roster del comercio (profesionales)' })
   @ApiResponse({ status: 200, type: Membership, isArray: true })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @Get(':comercioId/members')
   members(@CurrentComercio() comercioId: string) {
     return this.comercios.listMembers(comercioId);
   }
 
-  @ApiOperation({ summary: 'Invitar un profesional por email' })
+  @ApiOperation({
+    summary: 'Quitar un profesional del comercio',
+    description:
+      'Soft: marca la membresía inactiva y la desasigna de todos los servicios. Conserva los ' +
+      'turnos ya tomados; no permite nuevas reservas con ese profesional.',
+  })
+  @ApiResponse({ status: 200, type: Membership })
+  @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiResponse({ status: 404, description: 'Profesional no encontrado en este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
+  @UseGuards(ComercioOwnerGuard)
+  @Delete(':comercioId/members/:membershipId')
+  removeMember(@CurrentComercio() comercioId: string, @Param('membershipId') membershipId: string) {
+    return this.comercios.deactivateMembership(comercioId, membershipId);
+  }
+
+  @ApiOperation({
+    summary: 'Invitar un profesional por email',
+    description:
+      'El email no necesita tener cuenta de profesional al invitar: la invitación queda pendiente ' +
+      'y se valida que sea profesional al aceptarla.',
+  })
   @ApiResponse({ status: 201, type: ComercioInvitation })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
-  @ApiResponse({ status: 404, description: 'No existe un profesional con ese email' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @Post(':comercioId/invitations')
   invite(@CurrentComercio() comercioId: string, @Body() dto: InviteProfessionalDto) {
@@ -116,6 +138,7 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Listar invitaciones del comercio' })
   @ApiResponse({ status: 200, type: ComercioInvitation, isArray: true })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @Get(':comercioId/invitations')
   listInvitations(@CurrentComercio() comercioId: string) {
@@ -125,6 +148,7 @@ export class ComerciosController {
   @ApiOperation({ summary: 'Cancelar una invitación' })
   @ApiResponse({ status: 204, description: 'Invitación cancelada' })
   @ApiResponse({ status: 403, description: 'No administrás este comercio' })
+  @ApiParam({ name: 'comercioId', format: 'uuid' })
   @UseGuards(ComercioOwnerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':comercioId/invitations/:id')

@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { CombinationRuleType, DiscountType } from '@/common/enums';
 import { Service } from './entities/service.entity';
+import { ServiceMembership } from './entities/service-membership.entity';
 import { ServiceCombinationRule } from './entities/service-combination-rule.entity';
 import { CreateCombinationRuleDto } from './dto/service-combination-rule.dto';
 
@@ -25,7 +26,21 @@ export class ServiceCombinationRulesService {
     private readonly rules: Repository<ServiceCombinationRule>,
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    @InjectRepository(ServiceMembership)
+    private readonly serviceMemberships: Repository<ServiceMembership>,
   ) {}
+
+  /** Servicio asignado a la membresía (vía service_membership), o null. */
+  private async findAssignedService(
+    membershipId: string,
+    serviceId: string,
+  ): Promise<Service | null> {
+    const sm = await this.serviceMemberships.findOne({
+      where: { membershipId, serviceId },
+      relations: { service: true },
+    });
+    return sm?.service ?? null;
+  }
 
   listByMembership(membershipId: string): Promise<ServiceCombinationRule[]> {
     return this.rules.find({
@@ -55,11 +70,11 @@ export class ServiceCombinationRulesService {
       throw new BadRequestException('Un servicio no puede tener una regla consigo mismo');
     }
     const [source, target] = await Promise.all([
-      this.services.findOne({ where: { id: dto.sourceServiceId, membershipId } }),
-      this.services.findOne({ where: { id: dto.targetServiceId, membershipId } }),
+      this.findAssignedService(membershipId, dto.sourceServiceId),
+      this.findAssignedService(membershipId, dto.targetServiceId),
     ]);
-    if (!source) throw new NotFoundException('Servicio fuente no encontrado en esta membresía');
-    if (!target) throw new NotFoundException('Servicio destino no encontrado en esta membresía');
+    if (!source) throw new NotFoundException('Servicio fuente no ofrecido por este profesional');
+    if (!target) throw new NotFoundException('Servicio destino no ofrecido por este profesional');
 
     if (dto.ruleType === CombinationRuleType.Discount) {
       if (dto.discountAmountCents == null || dto.discountType == null) {
@@ -113,12 +128,16 @@ export class ServiceCombinationRulesService {
 
     const unique = [...new Set(addonServiceIds)];
 
-    const addonServices = await this.services.find({
-      where: { id: In(unique), membershipId, isActive: true },
+    const assignment = await this.serviceMemberships.find({
+      where: { membershipId, serviceId: In(unique) },
+      relations: { service: true },
     });
+    const addonServices = assignment
+      .map((sm) => sm.service)
+      .filter((s): s is Service => !!s && s.isActive);
     if (addonServices.length !== unique.length) {
       throw new BadRequestException(
-        'Algún servicio adicional no existe, pertenece a otro profesional o está inactivo',
+        'Algún servicio adicional no existe, no lo ofrece este profesional o está inactivo',
       );
     }
     if (addonServices.some((s) => s.id === primaryService.id)) {
@@ -150,20 +169,32 @@ export class ServiceCombinationRulesService {
     // Valida exclusiones entre cualquier par de servicios seleccionados.
     const excludeRules = await this.rules.find({
       where: [
-        { membershipId, ruleType: CombinationRuleType.Excludes, sourceServiceId: In(allSelectedIds) },
-        { membershipId, ruleType: CombinationRuleType.Excludes, targetServiceId: In(allSelectedIds) },
+        {
+          membershipId,
+          ruleType: CombinationRuleType.Excludes,
+          sourceServiceId: In(allSelectedIds),
+        },
+        {
+          membershipId,
+          ruleType: CombinationRuleType.Excludes,
+          targetServiceId: In(allSelectedIds),
+        },
       ],
     });
     for (const rule of excludeRules) {
       const srcSelected = allSelectedIds.includes(rule.sourceServiceId);
       const tgtSelected = allSelectedIds.includes(rule.targetServiceId);
       if (srcSelected && tgtSelected) {
-        const srcName = rule.sourceServiceId === primaryService.id
-          ? primaryService.name
-          : (addonServices.find((s) => s.id === rule.sourceServiceId)?.name ?? rule.sourceServiceId);
-        const tgtName = rule.targetServiceId === primaryService.id
-          ? primaryService.name
-          : (addonServices.find((s) => s.id === rule.targetServiceId)?.name ?? rule.targetServiceId);
+        const srcName =
+          rule.sourceServiceId === primaryService.id
+            ? primaryService.name
+            : (addonServices.find((s) => s.id === rule.sourceServiceId)?.name ??
+              rule.sourceServiceId);
+        const tgtName =
+          rule.targetServiceId === primaryService.id
+            ? primaryService.name
+            : (addonServices.find((s) => s.id === rule.targetServiceId)?.name ??
+              rule.targetServiceId);
         throw new BadRequestException(
           `Los servicios "${srcName}" y "${tgtName}" no pueden seleccionarse juntos`,
         );
@@ -186,7 +217,12 @@ export class ServiceCombinationRulesService {
         r.ruleType === CombinationRuleType.FreeWith,
     );
     if (freeRule) {
-      return { service: addon, priceAtBookingCents: addon.priceCents, discountAppliedCents: addon.priceCents, isFree: true };
+      return {
+        service: addon,
+        priceAtBookingCents: addon.priceCents,
+        discountAppliedCents: addon.priceCents,
+        isFree: true,
+      };
     }
 
     const discountRule = rules.find(
@@ -201,9 +237,19 @@ export class ServiceCombinationRulesService {
           ? Math.round((addon.priceCents * discountRule.discountAmountCents) / 10000)
           : discountRule.discountAmountCents;
       const applied = Math.min(discount, addon.priceCents);
-      return { service: addon, priceAtBookingCents: addon.priceCents, discountAppliedCents: applied, isFree: false };
+      return {
+        service: addon,
+        priceAtBookingCents: addon.priceCents,
+        discountAppliedCents: applied,
+        isFree: false,
+      };
     }
 
-    return { service: addon, priceAtBookingCents: addon.priceCents, discountAppliedCents: 0, isFree: false };
+    return {
+      service: addon,
+      priceAtBookingCents: addon.priceCents,
+      discountAppliedCents: 0,
+      isFree: false,
+    };
   }
 }

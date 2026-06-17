@@ -26,6 +26,7 @@ import {
   ClaimAccountDto,
   LoginDto,
   RefreshDto,
+  RegisterComercialDto,
   RegisterDto,
   RegisterProfessionalDto,
   RequestCodeDto,
@@ -60,6 +61,21 @@ export class AuthController {
   @Post('register-professional')
   registerProfessional(@Body() dto: RegisterProfessionalDto) {
     return this.auth.registerProfessional(dto);
+  }
+
+  @ApiOperation({
+    summary: 'Registrarse como comercial (dueño de un comercio)',
+    description:
+      'Crea la cuenta + el comercio que va a gestionar. NO crea profesional ni suscripción: el ' +
+      'comercial gestiona profesionales/servicios y no paga (la facturación es por profesional).',
+  })
+  @ApiResponse({ status: 201, type: AuthTokensDto })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 409, description: 'El slug ya está en uso' })
+  @Public()
+  @Post('register-comercial')
+  registerComercial(@Body() dto: RegisterComercialDto) {
+    return this.auth.registerComercial(dto);
   }
 
   @ApiOperation({ summary: 'Iniciar sesion' })
@@ -132,7 +148,10 @@ export class AuthController {
 
   // ---- Reclamo / verificacion / reset ----
   @ApiOperation({ summary: 'Solicitar codigo para reclamar cuenta' })
-  @ApiResponse({ status: 202, description: 'Respuesta { ok: true }; el codigo se envia por email.' })
+  @ApiResponse({
+    status: 202,
+    description: 'Respuesta { ok: true }; el codigo se envia por email.',
+  })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
@@ -153,7 +172,10 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Solicitar codigo de verificacion de email' })
-  @ApiResponse({ status: 202, description: 'Respuesta { ok: true }; el codigo se envia por email.' })
+  @ApiResponse({
+    status: 202,
+    description: 'Respuesta { ok: true }; el codigo se envia por email.',
+  })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
@@ -175,7 +197,10 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Solicitar codigo de reseteo de contrasena' })
-  @ApiResponse({ status: 202, description: 'Respuesta { ok: true }; el codigo se envia por email.' })
+  @ApiResponse({
+    status: 202,
+    description: 'Respuesta { ok: true }; el codigo se envia por email.',
+  })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
@@ -186,7 +211,10 @@ export class AuthController {
   }
 
   @ApiOperation({ summary: 'Resetear contrasena con codigo' })
-  @ApiResponse({ status: 200, description: 'Respuesta { ok: true } si la contrasena fue actualizada.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Respuesta { ok: true } si la contrasena fue actualizada.',
+  })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.OK)

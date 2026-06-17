@@ -6,12 +6,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import { MembershipStatus } from '@/common/enums';
 import { AppConfig } from '@/config/configuration';
 import { AccountsService } from '@/modules/identity/accounts.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { ServiceMembership } from '@/modules/catalog/entities/service-membership.entity';
 import { Comercio } from './entities/comercio.entity';
 import { Membership } from './entities/membership.entity';
 import { CreateComercialDto, UpdateComercioDto } from './dto/comercio.dto';
@@ -25,6 +26,8 @@ export class ComerciosService {
     private readonly memberships: Repository<Membership>,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
+    @InjectRepository(ServiceMembership)
+    private readonly serviceMemberships: Repository<ServiceMembership>,
     private readonly accounts: AccountsService,
     private readonly config: ConfigService,
   ) {}
@@ -56,8 +59,36 @@ export class ComerciosService {
     });
   }
 
+  /**
+   * Membresías ACTIVAS por id dentro de un comercio (valida pertenencia), con el
+   * professional cargado, devueltas en el MISMO orden que `membershipIds`. Lanza
+   * 400 si alguna no existe / no está activa / no pertenece al comercio.
+   */
+  async getActiveMembershipsInComercio(
+    comercioId: string,
+    membershipIds: string[],
+  ): Promise<Membership[]> {
+    const unique = [...new Set(membershipIds)];
+    if (unique.length === 0) return [];
+    const found = await this.memberships.find({
+      where: { id: In(unique), comercioId, status: MembershipStatus.Active },
+      relations: { professional: true },
+    });
+    const byId = new Map(found.map((m) => [m.id, m]));
+    const ordered = unique.map((id) => byId.get(id));
+    if (ordered.some((m) => !m)) {
+      throw new BadRequestException(
+        'Algún profesional no pertenece a este comercio o no está activo',
+      );
+    }
+    return ordered as Membership[];
+  }
+
   /** Una membresía activa por id dentro de un comercio (valida pertenencia). 404 si no. */
-  async getActiveMembershipInComercio(comercioId: string, membershipId: string): Promise<Membership> {
+  async getActiveMembershipInComercio(
+    comercioId: string,
+    membershipId: string,
+  ): Promise<Membership> {
     const membership = await this.memberships.findOne({
       where: { id: membershipId, comercioId, status: MembershipStatus.Active },
       relations: { professional: true },
@@ -250,6 +281,22 @@ export class ComerciosService {
   async getMembershipById(membershipId: string): Promise<Membership> {
     const membership = await this.memberships.findOne({ where: { id: membershipId } });
     if (!membership) throw new NotFoundException('Membresía no encontrada');
+    return membership;
+  }
+
+  /**
+   * Quita un profesional del comercio (soft): marca la membresía `inactive` y la
+   * desasigna de todos los servicios. Conserva los turnos ya tomados; no permite
+   * nuevas reservas con ese profesional. Solo membresías de ESTE comercio.
+   */
+  async deactivateMembership(comercioId: string, membershipId: string): Promise<Membership> {
+    const membership = await this.memberships.findOne({
+      where: { id: membershipId, comercioId },
+    });
+    if (!membership) throw new NotFoundException('Profesional no encontrado en este comercio');
+    membership.status = MembershipStatus.Inactive;
+    await this.memberships.save(membership);
+    await this.serviceMemberships.delete({ membershipId });
     return membership;
   }
 

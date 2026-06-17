@@ -130,7 +130,11 @@ export class Appointment extends BaseEntity {
   @ApiPropertyOptional({ description: 'Nombre del cliente del turno' })
   personName?: string;
 
-  @ApiPropertyOptional({ type: String, description: 'Teléfono del cliente del turno', nullable: true })
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Teléfono del cliente del turno',
+    nullable: true,
+  })
   personPhone?: string | null;
 
   @ApiPropertyOptional({ type: String, description: 'Email del cliente del turno', nullable: true })
@@ -138,4 +142,9 @@ export class Appointment extends BaseEntity {
 
   @ApiPropertyOptional({ description: 'Nombre del servicio del turno' })
   serviceName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Nombre del profesional asignado (se completa al reservar con "cualquiera").',
+  })
+  professionalDisplayName?: string;
 }
