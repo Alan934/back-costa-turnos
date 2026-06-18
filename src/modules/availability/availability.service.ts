@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, MoreThan, Repository } from 'typeorm';
 import { DateTime, Interval } from 'luxon';
-import { AppointmentStatus, ScheduleRuleKind } from '@/common/enums';
+import { AppointmentStatus, ScheduleRuleKind, TimeOffType } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { CatalogService } from '@/modules/catalog/catalog.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
@@ -39,6 +39,20 @@ interface BusyInterval {
   serviceId: string;
   startAt: Date;
   endAt: Date;
+}
+
+/** Entradas del núcleo de cálculo de slots (`buildSlots` / `buildSlotsWithCounts`). */
+interface BuildSlotsArgs {
+  rangeStart: DateTime;
+  rangeEnd: DateTime;
+  duration: number;
+  targetServiceId: string;
+  capacity: number;
+  workByDay: Map<number, ScheduleRule[]>;
+  breaksByDay: Map<number, ScheduleRule[]>;
+  timeOffs: TimeOff[];
+  busy: BusyInterval[];
+  minBookingHours?: number;
 }
 
 @Injectable()
@@ -208,6 +222,7 @@ export class AvailabilityService {
         staffId: staff.id,
         startAt: start,
         endAt: end,
+        type: dto.type ?? TimeOffType.Block,
         reason: dto.reason ?? null,
       }),
     );
@@ -251,12 +266,7 @@ export class AvailabilityService {
     addonServiceIds: string[] = [],
   ): Promise<DayAvailabilityDto[]> {
     const inputs = await this.prepareSlotInputs(membershipId, serviceId, from, to, addonServiceIds);
-    const slots = this.buildSlots(inputs);
-
-    // Días con al menos un slot libre.
-    const availableDays = new Set(
-      slots.map((s) => DateTime.fromISO(s.startAt, { zone: inputs.zone }).toISODate()),
-    );
+    const { countsByDay } = this.buildSlotsWithCounts(inputs);
 
     const days: DayAvailabilityDto[] = [];
     for (
@@ -267,9 +277,21 @@ export class AvailabilityService {
       const date = day.toISODate()!;
       const dow = day.weekday % 7; // 1=lunes..7=domingo -> 0=domingo..6=sabado
       const hasWork = (inputs.workByDay.get(dow)?.length ?? 0) > 0;
+      const counts = countsByDay.get(date) ?? { free: 0, total: 0 };
+      const occupancyRatio =
+        counts.total > 0 ? (counts.total - counts.free) / counts.total : 0;
 
-      if (availableDays.has(date)) {
-        days.push({ date, status: DayAvailabilityStatus.Available, reason: null, bookable: true });
+      if (counts.free > 0) {
+        days.push({
+          date,
+          status: DayAvailabilityStatus.Available,
+          reason: null,
+          timeOffType: null,
+          freeSlots: counts.free,
+          totalSlots: counts.total,
+          occupancyRatio,
+          bookable: true,
+        });
         continue;
       }
 
@@ -281,12 +303,34 @@ export class AvailabilityService {
           date,
           status: DayAvailabilityStatus.TimeOff,
           reason: timeOff.reason,
+          timeOffType: timeOff.type,
+          freeSlots: 0,
+          totalSlots: counts.total,
+          occupancyRatio,
           bookable: false,
         });
       } else if (!hasWork) {
-        days.push({ date, status: DayAvailabilityStatus.Closed, reason: null, bookable: false });
+        days.push({
+          date,
+          status: DayAvailabilityStatus.Closed,
+          reason: null,
+          timeOffType: null,
+          freeSlots: 0,
+          totalSlots: 0,
+          occupancyRatio: 0,
+          bookable: false,
+        });
       } else {
-        days.push({ date, status: DayAvailabilityStatus.Full, reason: null, bookable: false });
+        days.push({
+          date,
+          status: DayAvailabilityStatus.Full,
+          reason: null,
+          timeOffType: null,
+          freeSlots: 0,
+          totalSlots: counts.total,
+          occupancyRatio: counts.total > 0 ? 1 : 0,
+          bookable: false,
+        });
       }
     }
 
@@ -369,18 +413,37 @@ export class AvailabilityService {
 
   /** Combina dos estados de un día: bookable = OR; si no, full > time_off > closed. */
   private mergeDayAvailability(a: DayAvailabilityDto, b: DayAvailabilityDto): DayAvailabilityDto {
+    // Capacidad agregada del servicio "cualquiera": sumamos huecos de ambos
+    // profesionales y recalculamos la ocupación sobre el total combinado.
+    const freeSlots = a.freeSlots + b.freeSlots;
+    const totalSlots = a.totalSlots + b.totalSlots;
+    const occupancyRatio = totalSlots > 0 ? (totalSlots - freeSlots) / totalSlots : 0;
+
     if (a.bookable || b.bookable) {
       return {
         date: a.date,
         status: DayAvailabilityStatus.Available,
         reason: null,
+        timeOffType: null,
+        freeSlots,
+        totalSlots,
+        occupancyRatio,
         bookable: true,
       };
     }
     const rank = (s: DayAvailabilityStatus): number =>
       s === DayAvailabilityStatus.Full ? 3 : s === DayAvailabilityStatus.TimeOff ? 2 : 1;
     const winner = rank(b.status) > rank(a.status) ? b : a;
-    return { date: a.date, status: winner.status, reason: winner.reason, bookable: false };
+    return {
+      date: a.date,
+      status: winner.status,
+      reason: winner.reason,
+      timeOffType: winner.timeOffType,
+      freeSlots,
+      totalSlots,
+      occupancyRatio,
+      bookable: false,
+    };
   }
 
   /**
@@ -506,18 +569,23 @@ export class AvailabilityService {
   }
 
   // ---- Núcleo de cálculo de slots (compartido) ----
-  private buildSlots(args: {
-    rangeStart: DateTime;
-    rangeEnd: DateTime;
-    duration: number;
-    targetServiceId: string;
-    capacity: number;
-    workByDay: Map<number, ScheduleRule[]>;
-    breaksByDay: Map<number, ScheduleRule[]>;
-    timeOffs: TimeOff[];
-    busy: BusyInterval[];
-    minBookingHours?: number;
-  }): AvailableSlot[] {
+  private buildSlots(args: BuildSlotsArgs): AvailableSlot[] {
+    return this.buildSlotsWithCounts(args).slots;
+  }
+
+  /**
+   * Como `buildSlots`, pero además devuelve el conteo de capacidad por día:
+   * - `total`: slots dentro del horario de trabajo que NO caen en descanso ni en
+   *   un time_off (la capacidad realmente ofertada ese día).
+   * - `free`: de esos, los que además no están tomados por turnos/holds y no son
+   *   demasiado pronto (los reservables).
+   * "Ocupado" = `total - free` refleja lo que se llena con reservas, que es lo que
+   * el cliente percibe como "casi lleno". La fecha del mapa está en la zona local.
+   */
+  private buildSlotsWithCounts(args: BuildSlotsArgs): {
+    slots: AvailableSlot[];
+    countsByDay: Map<string, { free: number; total: number }>;
+  } {
     const {
       rangeStart,
       rangeEnd,
@@ -537,11 +605,14 @@ export class AvailabilityService {
     // mínima". Con minBookingHours=0 equivale a "no en el pasado".
     const earliestStart = DateTime.now().plus({ hours: args.minBookingHours ?? 0 });
     const slots: AvailableSlot[] = [];
+    const countsByDay = new Map<string, { free: number; total: number }>();
 
     for (let day = rangeStart; day <= rangeEnd; day = day.plus({ days: 1 }).startOf('day')) {
       const dow = day.weekday % 7; // luxon: 1=lunes..7=domingo -> 0=domingo..6=sabado
       const workRules = workByDay.get(dow) ?? [];
       const dayBreaks = breaksByDay.get(dow) ?? [];
+      const dateKey = day.toISODate()!;
+      const counts = { free: 0, total: 0 };
 
       for (const rule of workRules) {
         const [sh, sm] = rule.startTime.split(':').map(Number);
@@ -587,22 +658,30 @@ export class AvailabilityService {
             }
           }
 
-          const overlapsOccupied =
-            timeOffBlocked || otherServiceBlocked || sameServiceCount >= capacity;
+          // Capacidad ofertada: descontamos descansos y time_off (no son "ocupados"
+          // por una reserva, sino tiempo no atendido). Lo demás cuenta como total.
+          const offered = !overlapsBreak && !timeOffBlocked;
+          const takenByBooking = otherServiceBlocked || sameServiceCount >= capacity;
           const tooSoon = slotStart < earliestStart;
 
-          if (!overlapsBreak && !overlapsOccupied && !tooSoon) {
-            slots.push({
-              startAt: slotStart.toUTC().toISO()!,
-              endAt: slotEnd.toUTC().toISO()!,
-            });
+          if (offered) {
+            counts.total++;
+            if (!takenByBooking && !tooSoon) {
+              counts.free++;
+              slots.push({
+                startAt: slotStart.toUTC().toISO()!,
+                endAt: slotEnd.toUTC().toISO()!,
+              });
+            }
           }
           cursor = cursor.plus({ minutes: duration });
         }
       }
+
+      if (counts.total > 0) countsByDay.set(dateKey, counts);
     }
 
-    return slots;
+    return { slots, countsByDay };
   }
 
   // ---- Compat por professional + staff (comercio-de-uno) ----

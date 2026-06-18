@@ -1,6 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
+import { TimeOffType } from '@/common/enums';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 
@@ -36,6 +37,15 @@ export class TimeOff extends BaseEntity {
   @ApiProperty({ type: String, format: 'date-time' })
   @Column({ name: 'end_at', type: 'timestamptz' })
   endAt!: Date;
+
+  /**
+   * Tipo de ausencia (feriado / vacaciones / bloqueo). Lo elige el profesional al
+   * crear el bloqueo; se propaga al `day-availability` público para que el front
+   * coloree feriado/vacaciones/bloqueo sin adivinar por el texto de `reason`.
+   */
+  @ApiProperty({ enum: TimeOffType, enumName: 'TimeOffType' })
+  @Column({ type: 'text', default: TimeOffType.Block })
+  type!: TimeOffType;
 
   @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ type: 'text', nullable: true })

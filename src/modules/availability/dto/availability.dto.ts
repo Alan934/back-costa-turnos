@@ -11,7 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { ScheduleRuleKind } from '@/common/enums';
+import { ScheduleRuleKind, TimeOffType } from '@/common/enums';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
 
@@ -94,6 +94,15 @@ export class CreateTimeOffDto {
   @IsISO8601()
   endAt!: string;
 
+  @ApiPropertyOptional({
+    enum: TimeOffType,
+    enumName: 'TimeOffType',
+    description: 'Tipo de ausencia (feriado / vacaciones / bloqueo). Default: block.',
+  })
+  @IsOptional()
+  @IsEnum(TimeOffType)
+  type?: TimeOffType;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -168,6 +177,39 @@ export class DayAvailabilityDto {
       'Motivo del bloqueo cuando status=time_off (texto cargado por el profesional). null en otros casos.',
   })
   reason!: string | null;
+
+  @ApiPropertyOptional({
+    enum: TimeOffType,
+    enumName: 'TimeOffType',
+    nullable: true,
+    description:
+      'Tipo de ausencia (feriado / vacaciones / bloqueo) cuando status=time_off. null en otros casos. ' +
+      'Permite al front colorear feriado/vacaciones/bloqueo sin adivinar por el texto de reason.',
+  })
+  timeOffType!: TimeOffType | null;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'Huecos libres ese día (slots reservables). 0 cuando el día no es reservable.',
+  })
+  freeSlots!: number;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'Capacidad total del día = libres + ocupados (turnos, holds, descansos y time_off). ' +
+      '0 si no hay horario de atención ese día (status=closed).',
+  })
+  totalSlots!: number;
+
+  @ApiProperty({
+    type: Number,
+    description:
+      'Ocupación 0..1 = (totalSlots - freeSlots) / totalSlots. 0 si totalSlots=0. ' +
+      'Permite al front mostrar "casi lleno" con un umbral exacto.',
+  })
+  occupancyRatio!: number;
 
   @ApiProperty({
     type: Boolean,

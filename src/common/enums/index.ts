@@ -68,6 +68,13 @@ export enum ScheduleRuleKind {
   Break = 'break',
 }
 
+/** Tipo de ausencia de un `time_off` (feriado / vacaciones / bloqueo manual). */
+export enum TimeOffType {
+  Holiday = 'holiday',
+  Vacation = 'vacation',
+  Block = 'block',
+}
+
 export enum CalendarProvider {
   Google = 'google',
 }
