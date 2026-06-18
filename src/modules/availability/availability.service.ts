@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, MoreThan, Repository } from 'typeorm';
 import { DateTime, Interval } from 'luxon';
 import { AppointmentStatus, ScheduleRuleKind } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
@@ -9,6 +9,7 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { PendingBooking } from '@/modules/appointments/entities/pending-booking.entity';
 import { ScheduleRule } from './entities/schedule-rule.entity';
 import { ScheduleRuleService } from './entities/schedule-rule-service.entity';
 import { TimeOff } from './entities/time-off.entity';
@@ -29,6 +30,17 @@ const BLOCKING_STATUSES = [
   AppointmentStatus.Done,
 ];
 
+/**
+ * Intervalo que ocupa la agenda del profesional para el cálculo de slots: tanto
+ * turnos firmes (Appointment) como holds de pago vivos (PendingBooking) se tratan
+ * igual (mismo servicio cuenta contra el cupo, otro servicio bloquea).
+ */
+interface BusyInterval {
+  serviceId: string;
+  startAt: Date;
+  endAt: Date;
+}
+
 @Injectable()
 export class AvailabilityService {
   constructor(
@@ -46,6 +58,8 @@ export class AvailabilityService {
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
+    @InjectRepository(PendingBooking)
+    private readonly pendingBookings: Repository<PendingBooking>,
     private readonly comercios: ComerciosService,
     private readonly catalog: CatalogService,
   ) {}
@@ -390,7 +404,7 @@ export class AvailabilityService {
     workByDay: Map<number, ScheduleRule[]>;
     breaksByDay: Map<number, ScheduleRule[]>;
     timeOffs: TimeOff[];
-    busy: Appointment[];
+    busy: BusyInterval[];
     minBookingHours?: number;
   }> {
     const membership = await this.comercios.getMembershipById(membershipId);
@@ -456,13 +470,25 @@ export class AvailabilityService {
     const timeOffs = membershipIds.length
       ? await this.timeOffs.find({ where: { membershipId: In(membershipIds) } })
       : [];
-    const busy = await this.appointments.find({
+    const appointments = await this.appointments.find({
       where: {
         professionalId,
         status: In(BLOCKING_STATUSES),
         startAt: Between(utcStart, utcEnd),
       },
     });
+    // Holds de pago vivos (PendingBooking no vencidos): ocupan el horario igual
+    // que un turno firme mientras el cliente paga la seña con MercadoPago. Sin
+    // esto, un slot reservado por un hold se mostraría libre pero el booking lo
+    // rechazaría con 409 "El horario ya esta tomado".
+    const holds = await this.pendingBookings.find({
+      where: {
+        professionalId,
+        expiresAt: MoreThan(new Date()),
+        startAt: Between(utcStart, utcEnd),
+      },
+    });
+    const busy: BusyInterval[] = [...appointments, ...holds];
 
     return {
       rangeStart,
@@ -489,7 +515,7 @@ export class AvailabilityService {
     workByDay: Map<number, ScheduleRule[]>;
     breaksByDay: Map<number, ScheduleRule[]>;
     timeOffs: TimeOff[];
-    busy: Appointment[];
+    busy: BusyInterval[];
     minBookingHours?: number;
   }): AvailableSlot[] {
     const {

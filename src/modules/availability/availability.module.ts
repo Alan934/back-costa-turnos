@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfessionalsModule } from '@/modules/professionals/professionals.module';
 import { CatalogModule } from '@/modules/catalog/catalog.module';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { PendingBooking } from '@/modules/appointments/entities/pending-booking.entity';
 import { ScheduleRule } from './entities/schedule-rule.entity';
 import { ScheduleRuleService } from './entities/schedule-rule-service.entity';
 import { TimeOff } from './entities/time-off.entity';
@@ -19,6 +20,7 @@ import { ComercioAvailabilityController } from './comercio-availability.controll
       TimeOff,
       StaffCalendarIntegration,
       Appointment,
+      PendingBooking,
     ]),
     ProfessionalsModule,
     CatalogModule,
