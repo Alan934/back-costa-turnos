@@ -136,6 +136,7 @@ export class PublicBookingController {
       allowDeposit: s.allowDeposit,
       allowFullPayment: s.allowFullPayment,
       allowNoPayment: s.allowNoPayment,
+      allowCash: s.allowCash,
       depositAmountCents: s.depositAmountCents,
       professionals: (s.assignedMemberships ?? []).map((a) => ({
         membershipId: a.membershipId,

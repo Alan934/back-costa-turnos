@@ -119,8 +119,18 @@ export enum PaymentMethod {
 export enum PaymentStatus {
   Pending = 'pending',
   Paid = 'paid',
+  /** Efectivo no cobrado: el cliente quedó debiendo / pagará después (pagaré). */
+  Deferred = 'deferred',
   Refunded = 'refunded',
   Failed = 'failed',
+}
+
+/** Resultado del cobro en efectivo al finalizar un turno presencial. */
+export enum CashOutcome {
+  /** El profesional recibió el efectivo. */
+  Collected = 'collected',
+  /** No cobró / el cliente pagará después (pagaré). */
+  Deferred = 'deferred',
 }
 
 export enum WaitlistStatus {

@@ -13,6 +13,7 @@ import {
   BookAppointmentDto,
   BookWithDepositDto,
   CancelAppointmentDto,
+  CompleteAppointmentDto,
 } from './dto/appointment.dto';
 
 @ApiTags('appointments')
@@ -105,14 +106,23 @@ export class AppointmentsController {
     return this.appointments.start(tenantId, id);
   }
 
-  @ApiOperation({ summary: 'Completar un turno' })
+  @ApiOperation({
+    summary: 'Completar un turno',
+    description:
+      'Con pago en efectivo pendiente, enviar cashOutcome=collected (cobró) o deferred ' +
+      '(pagaré, el cliente quedó debiendo). Si se omite, el pago queda pendiente en el cierre de caja.',
+  })
   @ApiResponse({ status: 201, type: Appointment })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Post(':id/complete')
-  complete(@CurrentTenant() tenantId: string, @Param('id') id: string) {
-    return this.appointments.complete(tenantId, id);
+  complete(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: CompleteAppointmentDto,
+  ) {
+    return this.appointments.complete(tenantId, id, dto.cashOutcome, dto.note);
   }
 
   @ApiOperation({ summary: 'Marcar un turno como no-show' })

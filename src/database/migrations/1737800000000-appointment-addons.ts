@@ -26,7 +26,9 @@ export class AppointmentAddons1737800000000 implements MigrationInterface {
       );
     `);
 
-    await q(`CREATE INDEX IF NOT EXISTS idx_appointment_addon_appointment ON appointment_addon (appointment_id);`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_appointment_addon_appointment ON appointment_addon (appointment_id);`,
+    );
 
     const cond =
       `current_setting('app.tenant_id', true) IS NULL ` +

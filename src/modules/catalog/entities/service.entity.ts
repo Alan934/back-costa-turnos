@@ -87,6 +87,15 @@ export class Service extends BaseEntity {
   @Column({ name: 'allow_no_payment', type: 'boolean', default: true })
   allowNoPayment!: boolean;
 
+  /**
+   * Permite reservar pagando en efectivo (precio completo, sin IVA/recargo). El turno
+   * queda confirmado/fijo, pero el cobro se confirma en persona al finalizar (cierre de
+   * caja). No requiere MercadoPago conectado.
+   */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'allow_cash', type: 'boolean', default: false })
+  allowCash!: boolean;
+
   /** Monto de la seña (centavos). Requerido si allow_deposit. */
   @ApiPropertyOptional({ type: Number, nullable: true })
   @Column({ name: 'deposit_amount_cents', type: 'integer', nullable: true })

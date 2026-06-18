@@ -47,11 +47,20 @@ export class ServiceCombinationRule extends BaseEntity {
   })
   ruleType!: CombinationRuleType;
 
-  @ApiPropertyOptional({ type: Number, nullable: true, description: 'Monto del descuento (centavos). Solo para ruleType=discount' })
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description: 'Monto del descuento (centavos). Solo para ruleType=discount',
+  })
   @Column({ name: 'discount_amount_cents', type: 'integer', nullable: true })
   discountAmountCents!: number | null;
 
-  @ApiPropertyOptional({ enum: DiscountType, enumName: 'DiscountType', nullable: true, description: 'Tipo de descuento. Solo para ruleType=discount' })
+  @ApiPropertyOptional({
+    enum: DiscountType,
+    enumName: 'DiscountType',
+    nullable: true,
+    description: 'Tipo de descuento. Solo para ruleType=discount',
+  })
   @Column({
     name: 'discount_type',
     type: 'enum',

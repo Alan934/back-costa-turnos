@@ -145,7 +145,9 @@ export class ServicesSchedulesPerMembership1737000000000 implements MigrationInt
 
     // ---- 5. Indices ----
     await q(`CREATE INDEX IF NOT EXISTS idx_service_membership ON service (membership_id);`);
-    await q(`CREATE INDEX IF NOT EXISTS idx_schedule_rule_membership ON schedule_rule (membership_id);`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_schedule_rule_membership ON schedule_rule (membership_id);`,
+    );
     await q(`CREATE INDEX IF NOT EXISTS idx_time_off_membership ON time_off (membership_id);`);
     await q(
       `CREATE INDEX IF NOT EXISTS idx_appointment_membership_start ON appointment (membership_id, start_at);`,

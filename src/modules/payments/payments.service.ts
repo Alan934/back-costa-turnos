@@ -60,14 +60,39 @@ export class PaymentsService {
     return payment;
   }
 
-  /** Marca un pago en efectivo como cobrado (lo hace el profesional). */
+  /**
+   * Marca un pago en efectivo como cobrado (lo hace el profesional). Admite venir de
+   * un pago pendiente o de un pagaré (Deferred) que el cliente finalmente pagó.
+   */
   async markCashPaid(tenantId: string, id: string): Promise<Payment> {
     const payment = await this.findById(tenantId, id);
     if (payment.method !== PaymentMethod.Cash) {
       throw new BadRequestException('Solo se marcan manualmente los pagos en efectivo');
     }
+    if (![PaymentStatus.Pending, PaymentStatus.Deferred].includes(payment.status)) {
+      throw new BadRequestException('El pago no está pendiente de cobro');
+    }
     payment.status = PaymentStatus.Paid;
     payment.paidAt = new Date();
+    payment.note = null;
+    return this.payments.save(payment);
+  }
+
+  /**
+   * Marca un pago en efectivo como pagaré (el cliente quedó debiendo / pagará después).
+   * No cuenta como ingreso; aparece en el cierre de caja como pendiente de cobro.
+   */
+  async markCashDeferred(tenantId: string, id: string, note?: string): Promise<Payment> {
+    const payment = await this.findById(tenantId, id);
+    if (payment.method !== PaymentMethod.Cash) {
+      throw new BadRequestException('Solo se difieren los pagos en efectivo');
+    }
+    if (![PaymentStatus.Pending, PaymentStatus.Deferred].includes(payment.status)) {
+      throw new BadRequestException('El pago ya no está pendiente de cobro');
+    }
+    payment.status = PaymentStatus.Deferred;
+    payment.paidAt = null;
+    payment.note = note ?? null;
     return this.payments.save(payment);
   }
 

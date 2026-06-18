@@ -83,7 +83,9 @@ export class SubscriptionsService {
   async createCheckout(tenantId: string): Promise<{ initPoint: string }> {
     const sub = await this.getByTenant(tenantId);
     const account = await this.accounts.findOne({
-      where: { id: (await this.professionals.findOneOrFail({ where: { id: tenantId } })).accountId },
+      where: {
+        id: (await this.professionals.findOneOrFail({ where: { id: tenantId } })).accountId,
+      },
     });
 
     const pref = await this.provider.createPreference({

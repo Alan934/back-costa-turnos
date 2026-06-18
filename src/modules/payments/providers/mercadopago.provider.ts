@@ -87,9 +87,7 @@ export class MercadoPagoProvider implements PaymentProvider {
       return { externalRef: res.id, initPoint };
     } catch (err) {
       const detail =
-        err && typeof err === 'object' && 'cause' in err
-          ? JSON.stringify((err as { cause: unknown }).cause)
-          : String(err);
+        err && typeof err === 'object' && 'cause' in err ? JSON.stringify(err.cause) : String(err);
       this.logger.error(`MercadoPago createPreference fallo: ${detail}`);
       throw err;
     }
@@ -102,7 +100,7 @@ export class MercadoPagoProvider implements PaymentProvider {
       return null;
     }
     const data = payload['data'] as { id?: string | number } | undefined;
-    const rawId = data?.id ?? payload['id'] ?? (payload['resource'] as string | undefined);
+    const rawId = data?.id ?? payload['id'] ?? payload['resource'];
     const paymentId = rawId != null ? String(rawId) : null;
     if (!paymentId) return null;
 

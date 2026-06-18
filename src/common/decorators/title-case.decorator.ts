@@ -16,14 +16,13 @@ export function toTitleCase(value: string): string {
     .trim()
     .replace(/\s+/g, ' ')
     .toLocaleLowerCase('es')
-    .replace(/(^|[\s\-'’])([\p{L}])/gu, (_m, sep: string, char: string) =>
-      sep + char.toLocaleUpperCase('es'),
+    .replace(
+      /(^|[\s\-'’])([\p{L}])/gu,
+      (_m, sep: string, char: string) => sep + char.toLocaleUpperCase('es'),
     );
 }
 
 /** Aplica {@link toTitleCase} a un campo string de DTO durante la transformación. */
 export function TitleCase(): PropertyDecorator {
-  return Transform(({ value }) =>
-    typeof value === 'string' ? toTitleCase(value) : value,
-  );
+  return Transform(({ value }) => (typeof value === 'string' ? toTitleCase(value) : value));
 }

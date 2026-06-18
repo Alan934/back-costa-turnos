@@ -8,13 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiBody,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { TenantGuard } from '@/common/guards/tenant.guard';
@@ -24,7 +18,7 @@ import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
 import { PaymentsService } from './payments.service';
 import { Payment } from './entities/payment.entity';
-import { CreatePreferenceDto } from './dto/payment.dto';
+import { CreatePreferenceDto, DeferPaymentDto } from './dto/payment.dto';
 
 @ApiTags('payments')
 @Controller('payments')
@@ -54,6 +48,24 @@ export class PaymentsController {
   @Post(':id/mark-paid')
   markPaid(@CurrentTenant() tenantId: string, @Param('id') id: string) {
     return this.payments.markCashPaid(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Marcar pago en efectivo como pagaré (el cliente quedó debiendo)' })
+  @ApiResponse({ status: 200, type: Payment })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard, TenantGuard)
+  @Roles(AppRole.Professional, AppRole.Staff)
+  @Post(':id/mark-deferred')
+  markDeferred(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: DeferPaymentDto,
+  ) {
+    return this.payments.markCashDeferred(tenantId, id, body.note);
   }
 
   @ApiOperation({ summary: 'Crear preferencia de pago de MercadoPago' })

@@ -45,8 +45,12 @@ export class ServiceCombinationRules1737700000000 implements MigrationInterface 
       );
     `);
 
-    await q(`CREATE INDEX IF NOT EXISTS idx_combination_rule_source ON service_combination_rule (source_service_id);`);
-    await q(`CREATE INDEX IF NOT EXISTS idx_combination_rule_membership ON service_combination_rule (membership_id);`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_combination_rule_source ON service_combination_rule (source_service_id);`,
+    );
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_combination_rule_membership ON service_combination_rule (membership_id);`,
+    );
 
     const cond =
       `current_setting('app.tenant_id', true) IS NULL ` +

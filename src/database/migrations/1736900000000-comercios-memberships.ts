@@ -53,7 +53,9 @@ export class ComerciosMemberships1736900000000 implements MigrationInterface {
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_membership_pro_comercio ON membership (professional_id, comercio_id);`,
     );
     await q(`CREATE INDEX IF NOT EXISTS idx_membership_comercio ON membership (comercio_id);`);
-    await q(`CREATE INDEX IF NOT EXISTS idx_membership_professional ON membership (professional_id);`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_membership_professional ON membership (professional_id);`,
+    );
 
     await q(`
       CREATE TABLE IF NOT EXISTS comercio_invitation (
@@ -68,7 +70,9 @@ export class ComerciosMemberships1736900000000 implements MigrationInterface {
         updated_at timestamptz NOT NULL DEFAULT now()
       );
     `);
-    await q(`CREATE INDEX IF NOT EXISTS idx_invitation_comercio ON comercio_invitation (comercio_id);`);
+    await q(
+      `CREATE INDEX IF NOT EXISTS idx_invitation_comercio ON comercio_invitation (comercio_id);`,
+    );
     await q(
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_invitation_token ON comercio_invitation (token);`,
     );

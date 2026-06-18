@@ -57,6 +57,14 @@ export class CreateServiceDto {
   @IsBoolean()
   allowNoPayment?: boolean;
 
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'Permitir reservar pagando en efectivo (precio completo, sin IVA)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowCash?: boolean;
+
   @ApiPropertyOptional({ example: 200000, description: 'monto de la seña en centavos' })
   @IsOptional()
   @IsInt()

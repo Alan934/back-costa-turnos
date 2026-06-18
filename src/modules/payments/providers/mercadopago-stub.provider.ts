@@ -35,7 +35,7 @@ export class MercadoPagoStubProvider implements PaymentProvider {
       externalReference,
       paid: status === 'approved',
       status: typeof status === 'string' ? status : 'unknown',
-      providerPaymentId: typeof payload['id'] === 'string' ? (payload['id'] as string) : 'stub',
+      providerPaymentId: typeof payload['id'] === 'string' ? payload['id'] : 'stub',
     });
   }
 }

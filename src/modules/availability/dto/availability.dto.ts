@@ -190,8 +190,7 @@ export class DayAvailabilityDto {
 
   @ApiProperty({
     type: Number,
-    description:
-      'Huecos libres ese día (slots reservables). 0 cuando el día no es reservable.',
+    description: 'Huecos libres ese día (slots reservables). 0 cuando el día no es reservable.',
   })
   freeSlots!: number;
 

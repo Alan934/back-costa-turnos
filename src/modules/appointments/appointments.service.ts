@@ -13,6 +13,7 @@ import { uuidv7 } from 'uuidv7';
 import {
   AppointmentStatus,
   CancellationReason,
+  CashOutcome,
   CreatedVia,
   NotificationChannel,
   NotificationType,
@@ -516,10 +517,20 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }));
     const addonDuration = addonPricings.reduce((s, a) => s + a.service.durationMinutes, 0);
 
-    // Resuelve monto y tipo según la opción elegida (seña o pago completo).
+    const isCash = dto.method === PaymentMethod.Cash;
+
+    // Resuelve monto y tipo. El efectivo siempre cobra el precio completo del
+    // servicio (tal cual lo cargó el profesional, sin IVA/recargo), sin importar
+    // paymentOption. Online (MP) respeta la opción elegida (seña o pago completo).
     let amountCents: number;
     let paymentType: PaymentType;
-    if (option === PaymentOption.Full) {
+    if (isCash) {
+      if (!service.allowCash) {
+        throw new BadRequestException('Este servicio no admite pago en efectivo');
+      }
+      amountCents = service.priceCents;
+      paymentType = PaymentType.Service;
+    } else if (option === PaymentOption.Full) {
       if (!service.allowFullPayment) {
         throw new BadRequestException('Este servicio no admite pago completo');
       }
@@ -541,8 +552,6 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     this.assertLeadTime(startAt, membership.minBookingHours);
     const personId = await this.resolvePersonId(dto);
-
-    const isCash = dto.method === PaymentMethod.Cash;
 
     const { appointment, payment } = await this.tenantContext.runWithTenant(
       tenantId,
@@ -584,9 +593,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         const provToKeep = service.capacity - firmOccupied - 1;
         const provToBump = provSame.slice(Math.max(0, provToKeep));
 
-        // EFECTIVO: el turno se confirma en el acto (no hay checkout). Mantiene el
-        // comportamiento original: crea el Appointment + Payment Paid y bumpea
-        // provisionales que sobren.
+        // EFECTIVO: el turno se confirma firme en el acto (no hay checkout) y bumpea
+        // provisionales que sobren. El Payment queda PENDIENTE: el cobro se confirma en
+        // persona al finalizar el turno (ver complete() / cierre de caja), para no dar
+        // por cobrado dinero que todavía no se recibió.
         if (isCash) {
           for (const prov of provToBump) {
             prov.status = AppointmentStatus.Cancelled;
@@ -641,8 +651,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
               type: paymentType,
               amountCents,
               method: dto.method,
-              status: PaymentStatus.Paid,
-              paidAt: new Date(),
+              status: PaymentStatus.Pending,
+              paidAt: null,
             }),
           );
           await this.notifications.enqueue({
@@ -909,13 +919,53 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
   }
 
-  complete(tenantId: string, id: string): Promise<Appointment> {
-    return this.transition(tenantId, id, (a) => {
+  async complete(
+    tenantId: string,
+    id: string,
+    cashOutcome?: CashOutcome,
+    note?: string,
+  ): Promise<Appointment> {
+    const appointment = await this.transition(tenantId, id, (a) => {
       if (a.status !== AppointmentStatus.InProgress) {
         throw new BadRequestException('Solo se completan turnos en progreso');
       }
       a.status = AppointmentStatus.Done;
     });
+    if (cashOutcome) {
+      await this.applyCashOutcome(tenantId, id, cashOutcome, note);
+    }
+    return appointment;
+  }
+
+  /**
+   * Confirma el cobro en efectivo de un turno al finalizarlo: marca el pago en
+   * efectivo PENDIENTE del turno como cobrado (`Paid`) o como pagaré (`Deferred`,
+   * el cliente quedó debiendo). No-op si el turno no tiene un pago en efectivo
+   * pendiente (p. ej. se pagó por MercadoPago o ya se cerró antes).
+   */
+  private async applyCashOutcome(
+    tenantId: string,
+    appointmentId: string,
+    outcome: CashOutcome,
+    note?: string,
+  ): Promise<void> {
+    const payment = await this.payments.findOne({
+      where: {
+        professionalId: tenantId,
+        appointmentId,
+        method: PaymentMethod.Cash,
+        status: PaymentStatus.Pending,
+      },
+    });
+    if (!payment) return;
+    if (outcome === CashOutcome.Collected) {
+      payment.status = PaymentStatus.Paid;
+      payment.paidAt = new Date();
+    } else {
+      payment.status = PaymentStatus.Deferred;
+      payment.note = note ?? null;
+    }
+    await this.payments.save(payment);
   }
 
   noShow(tenantId: string, id: string): Promise<Appointment> {

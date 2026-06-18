@@ -29,7 +29,7 @@ async function generate(): Promise<void> {
     (acc, item) => acc + Object.keys(item).length,
     0,
   );
-  // eslint-disable-next-line no-console
+
   console.log(`OpenAPI generado: ${outPath} (${pathCount} rutas, ${opCount} operaciones)`);
 
   await app.close();
@@ -38,7 +38,6 @@ async function generate(): Promise<void> {
 generate()
   .then(() => process.exit(0))
   .catch((err) => {
-    // eslint-disable-next-line no-console
     console.error('Error generando OpenAPI:', err);
     process.exit(1);
   });

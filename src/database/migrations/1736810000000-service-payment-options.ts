@@ -12,7 +12,9 @@ export class ServicePaymentOptions1736810000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     const q = (sql: string) => queryRunner.query(sql);
 
-    await q(`ALTER TABLE service ADD COLUMN IF NOT EXISTS allow_deposit boolean NOT NULL DEFAULT false;`);
+    await q(
+      `ALTER TABLE service ADD COLUMN IF NOT EXISTS allow_deposit boolean NOT NULL DEFAULT false;`,
+    );
     await q(
       `ALTER TABLE service ADD COLUMN IF NOT EXISTS allow_full_payment boolean NOT NULL DEFAULT false;`,
     );

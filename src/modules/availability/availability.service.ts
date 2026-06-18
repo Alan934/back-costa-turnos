@@ -278,8 +278,7 @@ export class AvailabilityService {
       const dow = day.weekday % 7; // 1=lunes..7=domingo -> 0=domingo..6=sabado
       const hasWork = (inputs.workByDay.get(dow)?.length ?? 0) > 0;
       const counts = countsByDay.get(date) ?? { free: 0, total: 0 };
-      const occupancyRatio =
-        counts.total > 0 ? (counts.total - counts.free) / counts.total : 0;
+      const occupancyRatio = counts.total > 0 ? (counts.total - counts.free) / counts.total : 0;
 
       if (counts.free > 0) {
         days.push({

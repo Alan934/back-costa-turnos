@@ -32,6 +32,7 @@ import { FilesModule } from './modules/files/files.module';
 import { LegalModule } from './modules/legal/legal.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { CashClosingModule } from './modules/cash-closing/cash-closing.module';
 import { MeModule } from './modules/me/me.module';
 
 @Module({
@@ -106,6 +107,7 @@ import { MeModule } from './modules/me/me.module';
     LegalModule,
     AdminModule,
     MetricsModule,
+    CashClosingModule,
     MeModule,
   ],
   providers: [

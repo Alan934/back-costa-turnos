@@ -22,10 +22,9 @@ export class SeedPlatformAdmin1736800000000 implements MigrationInterface {
       return;
     }
 
-    const existing = (await queryRunner.query(
-      `SELECT id FROM account WHERE email = $1 LIMIT 1;`,
-      [email],
-    )) as Array<{ id: string }>;
+    const existing = (await queryRunner.query(`SELECT id FROM account WHERE email = $1 LIMIT 1;`, [
+      email,
+    ])) as Array<{ id: string }>;
 
     if (existing.length > 0) {
       // Ya existe: solo garantizamos que sea platform admin y este claimed/verificado.

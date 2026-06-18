@@ -48,8 +48,13 @@ export class IncomeByDayDto {
 export class MetricsTotalsDto {
   @ApiProperty({ type: Number })
   appointments!: number;
-  @ApiProperty({ type: Number })
+  @ApiProperty({ type: Number, description: 'Ingreso del período: solo pagos cobrados (Paid).' })
   incomeCents!: number;
+  @ApiProperty({
+    type: Number,
+    description: 'Efectivo pendiente de cobro (pendiente + pagaré), en centavos.',
+  })
+  pendingCashCents!: number;
   @ApiProperty({ type: Number })
   newClients!: number;
   @ApiProperty({ type: Number, description: 'Proporcion 0..1 de no-show' })

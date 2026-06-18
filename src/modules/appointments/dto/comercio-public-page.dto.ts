@@ -114,6 +114,9 @@ export class PublicServiceDto {
   @ApiProperty({ type: Boolean })
   allowNoPayment!: boolean;
 
+  @ApiProperty({ type: Boolean })
+  allowCash!: boolean;
+
   @ApiPropertyOptional({ type: Number, nullable: true })
   depositAmountCents!: number | null;
 

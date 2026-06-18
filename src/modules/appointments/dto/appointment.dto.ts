@@ -1,6 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsEmail, IsEnum, IsISO8601, IsOptional, IsString, IsNotEmpty, IsUUID } from 'class-validator';
-import { CancellationReason, PaymentMethod, PaymentOption } from '@/common/enums';
+import {
+  IsArray,
+  IsEmail,
+  IsEnum,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsNotEmpty,
+  IsUUID,
+} from 'class-validator';
+import { CancellationReason, CashOutcome, PaymentMethod, PaymentOption } from '@/common/enums';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
@@ -131,6 +140,24 @@ export class ConfirmDepositDto {
   @ApiProperty({ enum: PaymentMethod })
   @IsEnum(PaymentMethod)
   method!: PaymentMethod;
+}
+
+/**
+ * Cierre del turno. Para turnos con pago en efectivo pendiente, el profesional
+ * confirma el cobro al finalizar: `collected` = recibió el efectivo;
+ * `deferred` = no cobró / el cliente pagará después (pagaré). Si se omite, el
+ * pago queda pendiente y aparece en el cierre de caja.
+ */
+export class CompleteAppointmentDto {
+  @ApiPropertyOptional({ enum: CashOutcome, enumName: 'CashOutcome' })
+  @IsOptional()
+  @IsEnum(CashOutcome)
+  cashOutcome?: CashOutcome;
+
+  @ApiPropertyOptional({ description: 'Motivo del pagaré (si cashOutcome=deferred)' })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 export class CancelAppointmentDto {

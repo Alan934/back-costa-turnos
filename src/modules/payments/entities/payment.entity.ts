@@ -79,4 +79,9 @@ export class Payment extends BaseEntity {
   @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
   @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
   paidAt!: Date | null;
+
+  /** Motivo del pagaré (efectivo Deferred): lo que quedaron en pagar después. */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ name: 'note', type: 'text', nullable: true })
+  note!: string | null;
 }

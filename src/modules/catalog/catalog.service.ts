@@ -12,6 +12,7 @@ interface PaymentFlags {
   allowDeposit: boolean;
   allowFullPayment: boolean;
   allowNoPayment: boolean;
+  allowCash: boolean;
   depositAmountCents: number | null;
 }
 
@@ -27,9 +28,9 @@ export class CatalogService {
 
   /** Al menos una opción de pago habilitada; si hay seña, requiere monto. */
   private assertPaymentOptions(f: PaymentFlags): void {
-    if (!f.allowDeposit && !f.allowFullPayment && !f.allowNoPayment) {
+    if (!f.allowDeposit && !f.allowFullPayment && !f.allowNoPayment && !f.allowCash) {
       throw new BadRequestException(
-        'El servicio debe permitir al menos una opción de pago (seña, pago completo o sin pago)',
+        'El servicio debe permitir al menos una opción de pago (seña, pago completo, efectivo o sin pago)',
       );
     }
     if (f.allowDeposit && (f.depositAmountCents == null || f.depositAmountCents <= 0)) {
@@ -156,9 +157,10 @@ export class CatalogService {
 
     const allowDeposit = dto.allowDeposit ?? false;
     const allowFullPayment = dto.allowFullPayment ?? false;
-    const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment);
+    const allowCash = dto.allowCash ?? false;
+    const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment && !allowCash);
     const depositAmountCents = dto.depositAmountCents ?? null;
-    const flags = { allowDeposit, allowFullPayment, allowNoPayment, depositAmountCents };
+    const flags = { allowDeposit, allowFullPayment, allowNoPayment, allowCash, depositAmountCents };
     this.assertPaymentOptions(flags);
     this.assertAllMembershipsMpConnected(memberships, flags);
 
@@ -174,6 +176,7 @@ export class CatalogService {
         allowDeposit,
         allowFullPayment,
         allowNoPayment,
+        allowCash,
         depositAmountCents,
         capacity: dto.capacity ?? 1,
         isActive: true,
@@ -204,6 +207,7 @@ export class CatalogService {
       allowDeposit: dto.allowDeposit ?? service.allowDeposit,
       allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
       allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
+      allowCash: dto.allowCash ?? service.allowCash,
       depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
     };
     this.assertPaymentOptions(flags);

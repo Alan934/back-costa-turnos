@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import { DateTime } from 'luxon';
-import { AppointmentStatus } from '@/common/enums';
+import { AppointmentStatus, PaymentMethod, PaymentStatus } from '@/common/enums';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
-import { Service } from '@/modules/catalog/entities/service.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Payment } from '@/modules/payments/entities/payment.entity';
 import { MetricsOverviewDto, MetricsRange } from './dto/metrics.dto';
 
 interface Bucket {
@@ -24,12 +24,12 @@ export class MetricsService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
-    @InjectRepository(Service)
-    private readonly services: Repository<Service>,
     @InjectRepository(Person)
     private readonly persons: Repository<Person>,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
+    @InjectRepository(Payment)
+    private readonly payments: Repository<Payment>,
   ) {}
 
   async getOverview(tenantId: string, range: MetricsRange): Promise<MetricsOverviewDto> {
@@ -46,11 +46,27 @@ export class MetricsService {
       where: { professionalId: tenantId },
       select: ['id', 'personId', 'startAt', 'status', 'serviceId'],
     });
-    const priceByService = new Map(
-      (
-        await this.services.find({ where: { professionalId: tenantId }, select: ['id', 'priceCents'] })
-      ).map((s) => [s.id, s.priceCents]),
-    );
+
+    // Ingresos: solo pagos efectivamente cobrados (Paid), por fecha de cobro. Incluye
+    // señas, MercadoPago y efectivo confirmado; el efectivo no cobrado/pagaré no suma.
+    const paidPayments = await this.payments.find({
+      where: {
+        professionalId: tenantId,
+        status: PaymentStatus.Paid,
+        paidAt: Between(new Date(periodStart), new Date(periodEnd)),
+      },
+      select: ['amountCents', 'paidAt'],
+    });
+    // Efectivo pendiente de cobro (pendiente + pagaré), no acotado al período.
+    const unpaidCash = await this.payments.find({
+      where: {
+        professionalId: tenantId,
+        method: PaymentMethod.Cash,
+        status: In([PaymentStatus.Pending, PaymentStatus.Deferred]),
+      },
+      select: ['amountCents'],
+    });
+    const pendingCashCents = unpaidCash.reduce((acc, p) => acc + p.amountCents, 0);
 
     const firstByPerson = new Map<string, number>();
     const lastByPerson = new Map<string, number>();
@@ -82,10 +98,12 @@ export class MetricsService {
       };
     });
     const incomeByDay = buckets.map((b) => {
-      const cents = inPeriod
-        .filter((a) => a.status === AppointmentStatus.Done)
-        .filter((a) => a.startAt.getTime() >= b.start && a.startAt.getTime() <= b.end)
-        .reduce((acc, a) => acc + (priceByService.get(a.serviceId) ?? 0), 0);
+      const cents = paidPayments
+        .filter((p) => {
+          const t = p.paidAt?.getTime() ?? 0;
+          return t >= b.start && t <= b.end;
+        })
+        .reduce((acc, p) => acc + p.amountCents, 0);
       return { label: b.label, cents };
     });
 
@@ -113,6 +131,7 @@ export class MetricsService {
     const totals = {
       appointments: inPeriod.length,
       incomeCents: incomeByDay.reduce((acc, d) => acc + d.cents, 0),
+      pendingCashCents,
       newClients: nuevos,
       noShowRate: inPeriod.length ? +(noShowCount / inPeriod.length).toFixed(2) : 0,
     };

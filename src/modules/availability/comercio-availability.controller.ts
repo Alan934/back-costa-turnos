@@ -36,7 +36,11 @@ import {
  */
 @ApiTags('availability')
 @ApiBearerAuth()
-@ApiParam({ name: 'comercioId', format: 'uuid', description: 'Comercio donde opera el profesional' })
+@ApiParam({
+  name: 'comercioId',
+  format: 'uuid',
+  description: 'Comercio donde opera el profesional',
+})
 @UseGuards(JwtAuthGuard, ComercioMembershipGuard, SubscriptionGuard)
 @Controller('comercios/:comercioId/availability')
 export class ComercioAvailabilityController {
@@ -45,10 +49,7 @@ export class ComercioAvailabilityController {
   @ApiOperation({ summary: 'Calcular slots disponibles del profesional en este comercio' })
   @ApiResponse({ status: 200, description: 'Lista de slots libres (startAt/endAt en UTC ISO)' })
   @Get('slots')
-  computeSlots(
-    @CurrentMembership() membershipId: string,
-    @Query() query: ComercioSlotsQueryDto,
-  ) {
+  computeSlots(@CurrentMembership() membershipId: string, @Query() query: ComercioSlotsQueryDto) {
     return this.availability.computeSlotsByMembership(
       membershipId,
       query.serviceId,

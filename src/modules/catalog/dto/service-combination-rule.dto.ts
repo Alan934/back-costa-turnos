@@ -1,13 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsUUID,
-  Min,
-  ValidateIf,
-} from 'class-validator';
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsUUID, Min, ValidateIf } from 'class-validator';
 import { CombinationRuleType, DiscountType } from '@/common/enums';
 
 export class CreateCombinationRuleDto {

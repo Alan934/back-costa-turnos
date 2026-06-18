@@ -6,7 +6,21 @@ import { SubscriptionStatus } from '@/common/enums';
 import { Subscription } from '@/modules/subscriptions/entities/subscription.entity';
 import { AdminMetricsDto } from './dto/admin-metrics.dto';
 
-const MONTH_ES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const MONTH_ES = [
+  '',
+  'Ene',
+  'Feb',
+  'Mar',
+  'Abr',
+  'May',
+  'Jun',
+  'Jul',
+  'Ago',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dic',
+];
 const CHURNED = [SubscriptionStatus.Blocked, SubscriptionStatus.Cancelled];
 
 /**
