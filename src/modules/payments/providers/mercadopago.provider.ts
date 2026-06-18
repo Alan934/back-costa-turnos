@@ -63,8 +63,10 @@ export class MercadoPagoProvider implements PaymentProvider {
           external_reference: input.externalReference,
           ...(isPublic(notificationUrl) ? { notification_url: notificationUrl } : {}),
           ...(input.payerEmail ? { payer: { email: input.payerEmail } } : {}),
-          ...(input.marketplaceFeeCents && input.marketplaceFeeCents > 0
-            ? { marketplace_fee: input.marketplaceFeeCents / 100 }
+          // marketplace_fee debe incluirse siempre (incluso 0) cuando se usa el token del vendedor,
+          // para que MP reconozca el flujo marketplace y enrute el pago correctamente.
+          ...(input.sellerAccessToken != null
+            ? { marketplace_fee: (input.marketplaceFeeCents ?? 0) / 100 }
             : {}),
           ...(isPublic(input.backUrl)
             ? {
