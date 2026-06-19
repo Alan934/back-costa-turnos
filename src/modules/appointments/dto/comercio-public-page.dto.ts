@@ -99,6 +99,19 @@ export class PublicServiceDto {
   @ApiProperty()
   name!: string;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Descripción del servicio (qué incluye / qué se realiza).',
+  })
+  description!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    description: 'URLs firmadas (temporales) de las imágenes de ejemplo del servicio.',
+  })
+  imageUrls!: string[];
+
   @ApiProperty({ type: Number })
   durationMinutes!: number;
 

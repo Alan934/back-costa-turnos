@@ -4,6 +4,7 @@ import { CatalogService } from './catalog.service';
 import { Service } from './entities/service.entity';
 import { ServiceMembership } from './entities/service-membership.entity';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { FilesService } from '@/modules/files/files.service';
 
 describe('CatalogService (opciones de pago)', () => {
   let service: CatalogService;
@@ -52,10 +53,12 @@ describe('CatalogService (opciones de pago)', () => {
         ]),
       ),
     };
+    const files = { removeByKeys: jest.fn(() => Promise.resolve()) };
     service = new CatalogService(
       repo as unknown as Repository<Service>,
       serviceMemberships as unknown as Repository<ServiceMembership>,
       comercios as unknown as ComerciosService,
+      files as unknown as FilesService,
     );
   });
 

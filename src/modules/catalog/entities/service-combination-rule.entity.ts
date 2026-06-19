@@ -38,6 +38,14 @@ export class ServiceCombinationRule extends BaseEntity {
   @JoinColumn({ name: 'target_service_id' })
   targetService?: Service;
 
+  /**
+   * Descripción opcional de la relación: aclara qué se realiza al combinar estos
+   * servicios o qué tener en cuenta para relacionarlos.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ type: 'text', nullable: true })
+  description!: string | null;
+
   @ApiProperty({ enum: CombinationRuleType, enumName: 'CombinationRuleType' })
   @Column({
     name: 'rule_type',

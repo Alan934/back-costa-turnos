@@ -93,6 +93,7 @@ export class ServiceCombinationRulesService {
         sourceServiceId: dto.sourceServiceId,
         targetServiceId: dto.targetServiceId,
         ruleType: dto.ruleType,
+        description: dto.description ?? null,
         discountAmountCents: dto.discountAmountCents ?? null,
         discountType: dto.discountType ?? null,
       });

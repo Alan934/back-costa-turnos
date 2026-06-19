@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsUUID, Min, ValidateIf } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { CombinationRuleType, DiscountType } from '@/common/enums';
 
 export class CreateCombinationRuleDto {
@@ -16,6 +25,15 @@ export class CreateCombinationRuleDto {
   @ApiProperty({ enum: CombinationRuleType, enumName: 'CombinationRuleType' })
   @IsEnum(CombinationRuleType)
   ruleType!: CombinationRuleType;
+
+  @ApiPropertyOptional({
+    description:
+      'Descripción opcional de la relación: qué se realiza al combinar estos servicios o ' +
+      'qué tener en cuenta para relacionarlos',
+  })
+  @IsOptional()
+  @IsString()
+  description?: string;
 
   @ApiPropertyOptional({
     type: Number,

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { MembershipStatus } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { FilesService } from '@/modules/files/files.service';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { Service, ServiceAssignedMembership } from './entities/service.entity';
 import { ServiceMembership } from './entities/service-membership.entity';
@@ -24,6 +25,7 @@ export class CatalogService {
     @InjectRepository(ServiceMembership)
     private readonly serviceMemberships: Repository<ServiceMembership>,
     private readonly comercios: ComerciosService,
+    private readonly files: FilesService,
   ) {}
 
   /** Al menos una opción de pago habilitada; si hay seña, requiere monto. */
@@ -171,6 +173,8 @@ export class CatalogService {
         comercioId,
         membershipId: creator.id,
         name: dto.name,
+        description: dto.description ?? null,
+        imageKeys: dto.imageKeys ?? [],
         durationMinutes: dto.durationMinutes,
         priceCents: dto.priceCents,
         allowDeposit,
@@ -214,6 +218,13 @@ export class CatalogService {
     const assignedForMp = newMemberships ?? (await this.activeAssignedMemberships(id));
     this.assertAllMembershipsMpConnected(assignedForMp, flags);
 
+    // Imágenes que dejan de estar referenciadas (reemplazadas o quitadas): se borran
+    // de MinIO para no dejar objetos huérfanos ocupando espacio.
+    const removedImageKeys =
+      dto.imageKeys !== undefined
+        ? (service.imageKeys ?? []).filter((k) => !dto.imageKeys!.includes(k))
+        : [];
+
     const { membershipIds: _ignored, ...scalar } = dto;
     Object.assign(service, scalar);
 
@@ -228,6 +239,7 @@ export class CatalogService {
       service.professionalId = newMemberships[0].professionalId;
     }
     await this.services.save(service);
+    if (removedImageKeys.length > 0) await this.files.removeByKeys(removedImageKeys);
     return this.getForComercio(comercioId, id);
   }
 

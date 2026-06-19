@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { FilesConfig } from '@/config/configuration';
@@ -135,6 +135,18 @@ export class FilesService {
     return Math.round(bytes / (1024 * 1024));
   }
 
+  /**
+   * URLs firmadas para una lista de object_keys (sin chequeo de tenant: se usa para
+   * mostrar imágenes públicas, ej. ejemplos de servicios en la página de reservas).
+   * Las keys que no se puedan firmar se omiten.
+   */
+  async getSignedUrlsForKeys(keys: string[], expirySeconds = 900): Promise<string[]> {
+    const urls = await Promise.all(
+      keys.map((key) => this.storage.getSignedUrl(key, expirySeconds).catch(() => null)),
+    );
+    return urls.filter((u): u is string => u !== null);
+  }
+
   async getSignedUrl(tenantId: string, id: string): Promise<{ url: string }> {
     const file = await this.files.findOne({
       where: { id, professionalId: tenantId },
@@ -142,6 +154,17 @@ export class FilesService {
     if (!file) throw new NotFoundException('Archivo no encontrado');
     const url = await this.storage.getSignedUrl(file.objectKey);
     return { url };
+  }
+
+  /**
+   * Borra objetos de MinIO por su object_key y limpia sus metadatos. Best-effort:
+   * si un objeto ya no existe en el storage no se aborta el resto. Se usa al quitar
+   * imágenes de una entidad (ej. ejemplos de un servicio) para no dejar huérfanos.
+   */
+  async removeByKeys(keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    await Promise.all(keys.map((key) => this.storage.remove(key).catch(() => undefined)));
+    await this.files.delete({ objectKey: In(keys) });
   }
 
   async remove(tenantId: string, id: string): Promise<void> {

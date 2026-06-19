@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
@@ -18,6 +19,24 @@ export class CreateServiceDto {
   @IsNotEmpty()
   @TitleCase()
   name!: string;
+
+  @ApiPropertyOptional({
+    description: 'Descripción opcional del servicio (qué incluye, qué se realiza, etc.)',
+  })
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Hasta 3 imágenes de ejemplo (object_keys obtenidos de POST /files?ownerType=service)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  imageKeys?: string[];
 
   @ApiPropertyOptional({
     type: [String],

@@ -21,6 +21,7 @@ import { ServiceCombinationRulesService } from '@/modules/catalog/service-combin
 import { AvailabilityService } from '@/modules/availability/availability.service';
 import { DayAvailabilityDto } from '@/modules/availability/dto/availability.dto';
 import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.service';
+import { FilesService } from '@/modules/files/files.service';
 import { AppointmentsService } from './appointments.service';
 import { Appointment } from './entities/appointment.entity';
 import {
@@ -47,6 +48,7 @@ export class PublicBookingController {
     private readonly subscriptions: SubscriptionsService,
     private readonly appointments: AppointmentsService,
     private readonly combinationRules: ServiceCombinationRulesService,
+    private readonly files: FilesService,
   ) {}
 
   /** Dirección visible: la propia de la membresía o, si no hay, la del comercio. */
@@ -128,23 +130,27 @@ export class PublicBookingController {
     const addressByMembership = new Map(
       members.map((m) => [m.id, this.resolveAddress(m, comercio)]),
     );
-    return list.map((s) => ({
-      serviceId: s.id,
-      name: s.name,
-      durationMinutes: s.durationMinutes,
-      priceCents: s.priceCents,
-      allowDeposit: s.allowDeposit,
-      allowFullPayment: s.allowFullPayment,
-      allowNoPayment: s.allowNoPayment,
-      allowCash: s.allowCash,
-      depositAmountCents: s.depositAmountCents,
-      professionals: (s.assignedMemberships ?? []).map((a) => ({
-        membershipId: a.membershipId,
-        professionalId: a.professionalId,
-        displayName: a.displayName,
-        address: addressByMembership.get(a.membershipId) ?? comercio.address,
+    return Promise.all(
+      list.map(async (s) => ({
+        serviceId: s.id,
+        name: s.name,
+        description: s.description,
+        imageUrls: await this.files.getSignedUrlsForKeys(s.imageKeys ?? []),
+        durationMinutes: s.durationMinutes,
+        priceCents: s.priceCents,
+        allowDeposit: s.allowDeposit,
+        allowFullPayment: s.allowFullPayment,
+        allowNoPayment: s.allowNoPayment,
+        allowCash: s.allowCash,
+        depositAmountCents: s.depositAmountCents,
+        professionals: (s.assignedMemberships ?? []).map((a) => ({
+          membershipId: a.membershipId,
+          professionalId: a.professionalId,
+          displayName: a.displayName,
+          address: addressByMembership.get(a.membershipId) ?? comercio.address,
+        })),
       })),
-    }));
+    );
   }
 
   @ApiOperation({

@@ -63,6 +63,19 @@ export class Service extends BaseEntity {
   @Column({ type: 'text' })
   name!: string;
 
+  /** Descripción opcional del servicio: qué incluye, qué se realiza, etc. */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ type: 'text', nullable: true })
+  description!: string | null;
+
+  /**
+   * Hasta 3 imágenes de ejemplo del servicio (object_keys en MinIO, subidas vía
+   * `POST /files?ownerType=service`). Sirven para ilustrar qué se realiza.
+   */
+  @ApiProperty({ type: [String], description: 'object_keys de imágenes de ejemplo (máx. 3)' })
+  @Column({ name: 'image_keys', type: 'jsonb', default: () => "'[]'::jsonb" })
+  imageKeys!: string[];
+
   @ApiProperty({ type: Number })
   @Column({ name: 'duration_minutes', type: 'integer' })
   durationMinutes!: number;
