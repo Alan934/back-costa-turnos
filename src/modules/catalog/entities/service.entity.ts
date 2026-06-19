@@ -133,4 +133,11 @@ export class Service extends BaseEntity {
    */
   @ApiPropertyOptional({ type: ServiceAssignedMembership, isArray: true })
   assignedMemberships?: ServiceAssignedMembership[];
+
+  /**
+   * Campo derivado (no persistido): URLs firmadas temporales de `imageKeys`, listas
+   * para mostrar (`<img src>`). Las rellena CatalogService en las lecturas.
+   */
+  @ApiPropertyOptional({ type: [String], description: 'URLs firmadas (temporales) de imageKeys' })
+  imageUrls?: string[];
 }

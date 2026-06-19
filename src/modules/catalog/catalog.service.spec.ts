@@ -53,7 +53,10 @@ describe('CatalogService (opciones de pago)', () => {
         ]),
       ),
     };
-    const files = { removeByKeys: jest.fn(() => Promise.resolve()) };
+    const files = {
+      removeByKeys: jest.fn(() => Promise.resolve()),
+      getSignedUrlsForKeys: jest.fn(() => Promise.resolve([])),
+    };
     service = new CatalogService(
       repo as unknown as Repository<Service>,
       serviceMemberships as unknown as Repository<ServiceMembership>,

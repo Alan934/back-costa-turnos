@@ -7,7 +7,6 @@ import { AvailabilityModule } from '@/modules/availability/availability.module';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from '@/modules/payments/payments.module';
-import { FilesModule } from '@/modules/files/files.module';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
@@ -41,7 +40,6 @@ import { AppointmentsJobs } from './appointments.jobs';
     NotificationsModule,
     SubscriptionsModule,
     PaymentsModule,
-    FilesModule,
   ],
   controllers: [AppointmentsController, PublicBookingController],
   providers: [AppointmentsService, WaitingRoomGateway, AppointmentsJobs],

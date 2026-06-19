@@ -110,6 +110,16 @@ export class CatalogService {
       map.set(row.serviceId, list);
     }
     for (const s of servicesList) s.assignedMemberships = map.get(s.id) ?? [];
+    return this.attachImageUrls(servicesList);
+  }
+
+  /** Rellena `imageUrls` (URLs firmadas temporales) a partir de `imageKeys`. */
+  private async attachImageUrls(servicesList: Service[]): Promise<Service[]> {
+    await Promise.all(
+      servicesList.map(async (s) => {
+        s.imageUrls = await this.files.getSignedUrlsForKeys(s.imageKeys ?? []);
+      }),
+    );
     return servicesList;
   }
 
@@ -257,21 +267,23 @@ export class CatalogService {
       where: { membershipId },
       relations: { service: true },
     });
-    return rows
+    const list = rows
       .map((r) => r.service)
       .filter((s): s is Service => !!s && s.isActive)
       .sort((a, b) => a.name.localeCompare(b.name));
+    return this.attachImageUrls(list);
   }
 
-  listAllByMembership(membershipId: string): Promise<Service[]> {
-    return this.serviceMemberships
-      .find({ where: { membershipId }, relations: { service: true } })
-      .then((rows) =>
-        rows
-          .map((r) => r.service)
-          .filter((s): s is Service => !!s)
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      );
+  async listAllByMembership(membershipId: string): Promise<Service[]> {
+    const rows = await this.serviceMemberships.find({
+      where: { membershipId },
+      relations: { service: true },
+    });
+    const list = rows
+      .map((r) => r.service)
+      .filter((s): s is Service => !!s)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.attachImageUrls(list);
   }
 
   async findByMembership(membershipId: string, id: string): Promise<Service> {
@@ -279,7 +291,7 @@ export class CatalogService {
     if (!service || !(await this.isAssigned(id, membershipId))) {
       throw new NotFoundException('Servicio no encontrado');
     }
-    return service;
+    return (await this.attachImageUrls([service]))[0];
   }
 
   /**
