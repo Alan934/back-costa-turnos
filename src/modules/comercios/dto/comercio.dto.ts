@@ -78,6 +78,18 @@ export class UpdateMembershipDto {
   @Min(0)
   @Max(720)
   minBookingHours?: number;
+
+  @ApiPropertyOptional({
+    type: Number,
+    example: 30,
+    description:
+      'Ventana máxima de reserva, en días. Un cliente solo puede reservar un turno que empiece como mucho estos días en el futuro (7 = una semana, 30 = un mes). 0 = sin límite.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(730)
+  maxBookingDays?: number;
 }
 
 export class InviteProfessionalDto {

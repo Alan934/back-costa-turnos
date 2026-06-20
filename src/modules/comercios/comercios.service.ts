@@ -303,7 +303,7 @@ export class ComerciosService {
   /** Edita una membresía (p.ej. la dirección propia del profesional en el comercio). */
   async updateMembership(
     membershipId: string,
-    dto: { address?: string | null; minBookingHours?: number },
+    dto: { address?: string | null; minBookingHours?: number; maxBookingDays?: number },
   ): Promise<Membership> {
     const membership = await this.getMembershipById(membershipId);
     if (dto.address !== undefined) {
@@ -312,6 +312,9 @@ export class ComerciosService {
     }
     if (dto.minBookingHours !== undefined) {
       membership.minBookingHours = dto.minBookingHours;
+    }
+    if (dto.maxBookingDays !== undefined) {
+      membership.maxBookingDays = dto.maxBookingDays;
     }
     return this.memberships.save(membership);
   }

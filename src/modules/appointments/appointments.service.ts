@@ -302,6 +302,20 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }
   }
 
+  /**
+   * Ventana máxima: el turno no puede empezar más de `maxBookingDays` días después
+   * de "ahora". 0 = sin límite.
+   */
+  private assertMaxBookingWindow(startAt: Date, maxBookingDays: number): void {
+    if (maxBookingDays <= 0) return;
+    const latest = Date.now() + maxBookingDays * 24 * 60 * 60_000;
+    if (startAt.getTime() > latest) {
+      throw new BadRequestException(
+        `El turno no puede reservarse con más de ${maxBookingDays} días de anticipación`,
+      );
+    }
+  }
+
   private async resolvePersonId(ref: ClientRefDto): Promise<string> {
     if (ref.personId) {
       const person = await this.persons.findById(ref.personId);
@@ -422,6 +436,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     this.assertLeadTime(startAt, membership.minBookingHours);
+    this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
     const personId = await this.resolvePersonId(dto);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
@@ -551,6 +566,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     this.assertLeadTime(startAt, membership.minBookingHours);
+    this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
     const personId = await this.resolvePersonId(dto);
 
     const { appointment, payment } = await this.tenantContext.runWithTenant(

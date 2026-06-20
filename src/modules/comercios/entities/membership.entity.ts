@@ -56,4 +56,14 @@ export class Membership extends BaseEntity {
   @ApiProperty({ type: Number, example: 8 })
   @Column({ name: 'min_booking_hours', type: 'int', default: 0 })
   minBookingHours!: number;
+
+  /**
+   * Ventana máxima de reserva (en días): un cliente solo puede reservar un turno
+   * cuyo inicio esté como mucho estos días en el futuro (p.ej. 7 = una semana,
+   * 30 = un mes). 0 = sin límite. Lo define el profesional para su agenda en este
+   * comercio.
+   */
+  @ApiProperty({ type: Number, example: 30 })
+  @Column({ name: 'max_booking_days', type: 'int', default: 0 })
+  maxBookingDays!: number;
 }

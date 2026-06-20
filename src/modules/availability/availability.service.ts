@@ -53,6 +53,7 @@ interface BuildSlotsArgs {
   timeOffs: TimeOff[];
   busy: BusyInterval[];
   minBookingHours?: number;
+  maxBookingDays?: number;
 }
 
 @Injectable()
@@ -468,6 +469,7 @@ export class AvailabilityService {
     timeOffs: TimeOff[];
     busy: BusyInterval[];
     minBookingHours?: number;
+    maxBookingDays?: number;
   }> {
     const membership = await this.comercios.getMembershipById(membershipId);
     const comercio = await this.comercios.getComercio(membership.comercioId);
@@ -564,6 +566,7 @@ export class AvailabilityService {
       timeOffs,
       busy,
       minBookingHours: membership.minBookingHours,
+      maxBookingDays: membership.maxBookingDays,
     };
   }
 
@@ -603,6 +606,12 @@ export class AvailabilityService {
     // Punto de corte: un slot debe empezar a partir de "ahora + anticipación
     // mínima". Con minBookingHours=0 equivale a "no en el pasado".
     const earliestStart = DateTime.now().plus({ hours: args.minBookingHours ?? 0 });
+    // Corte superior: un slot no puede empezar más allá de "ahora + ventana
+    // máxima". maxBookingDays=0 => sin límite.
+    const latestStart =
+      args.maxBookingDays && args.maxBookingDays > 0
+        ? DateTime.now().plus({ days: args.maxBookingDays })
+        : null;
     const slots: AvailableSlot[] = [];
     const countsByDay = new Map<string, { free: number; total: number }>();
 
@@ -662,10 +671,11 @@ export class AvailabilityService {
           const offered = !overlapsBreak && !timeOffBlocked;
           const takenByBooking = otherServiceBlocked || sameServiceCount >= capacity;
           const tooSoon = slotStart < earliestStart;
+          const tooLate = latestStart !== null && slotStart > latestStart;
 
           if (offered) {
             counts.total++;
-            if (!takenByBooking && !tooSoon) {
+            if (!takenByBooking && !tooSoon && !tooLate) {
               counts.free++;
               slots.push({
                 startAt: slotStart.toUTC().toISO()!,

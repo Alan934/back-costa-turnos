@@ -136,6 +136,17 @@ export class MeService {
       );
     }
 
+    // Ventana máxima del comercio: el nuevo horario no puede excederla. 0 = sin límite.
+    const maxBookingDays = membership?.maxBookingDays ?? 0;
+    if (maxBookingDays > 0) {
+      const latest = Date.now() + maxBookingDays * 24 * 3_600_000;
+      if (newStart.getTime() > latest) {
+        throw new BadRequestException(
+          `El turno no puede reprogramarse con más de ${maxBookingDays} días de anticipación`,
+        );
+      }
+    }
+
     // Solape en la agenda del profesional (excluye el propio turno que se está moviendo).
     const conflicts = await this.appointments
       .createQueryBuilder('a')
