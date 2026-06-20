@@ -32,6 +32,15 @@ export class PublicProfessionalDto {
     description: 'Teléfono/WhatsApp del profesional (publicPageSettings.phone).',
   })
   phone!: string | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Si es true, una reserva sin seña con este profesional queda provisional (desplazable por ' +
+      'quien pague la seña). El front lo usa para mostrar/ocultar el aviso pre-reserva. ' +
+      'false = el turno sin seña queda firme.',
+  })
+  allowProvisionalBookings!: boolean;
 }
 
 /** Respuesta de GET /r/:slug: la página pública del COMERCIO. */
@@ -85,6 +94,15 @@ export class PublicServiceProfessionalDto {
     description: 'Dirección donde atiende: la propia de la membresía o la del comercio (fallback).',
   })
   address!: string | null;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Si es true, una reserva sin seña con este profesional queda provisional (desplazable por ' +
+      'quien pague la seña). En el flujo "cualquiera", el front puede mostrar el aviso pre-reserva ' +
+      'si al menos un profesional lo tiene en true. false = el turno sin seña queda firme.',
+  })
+  allowProvisionalBookings!: boolean;
 }
 
 /**

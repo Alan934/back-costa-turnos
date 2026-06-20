@@ -406,8 +406,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   /**
    * Reserva un turno SIN pagar.
    * - Si el servicio NO permite "sin pago" -> rechaza (hay que pagar seña o total).
-   * - Si además hay una opción paga habilitada -> queda provisional (desplazable
-   *   por alguien que pague). Si solo permite "sin pago" -> confirmado firme.
+   * - Si la membresía habilita reservas provisionales Y el servicio admite pago ->
+   *   queda provisional (desplazable por alguien que pague). En otro caso queda
+   *   confirmado firme (default: no provisional).
    */
   async book(
     tenantId: string,
@@ -454,8 +455,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       throw new ConflictException('El horario ya no esta disponible.');
     }
 
-    // Provisional (desplazable) solo si el servicio también admite pago.
+    // Provisional (desplazable) solo si el profesional lo habilitó para su agenda
+    // en este comercio Y el servicio además admite pago. Si no, el turno sin seña
+    // queda firme y nadie lo puede desplazar.
     const hasPaidOption = service.allowDeposit || service.allowFullPayment;
+    const isProvisional = membership.allowProvisionalBookings && hasPaidOption;
     const appointment = this.appointments.create({
       professionalId: tenantId,
       comercioId,
@@ -466,7 +470,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       startAt,
       endAt,
       status: AppointmentStatus.Confirmed,
-      isProvisional: hasPaidOption,
+      isProvisional,
       createdVia,
     });
     const saved = await this.appointments.save(appointment);

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEmail,
   IsInt,
   IsNotEmpty,
@@ -90,6 +91,16 @@ export class UpdateMembershipDto {
   @Min(0)
   @Max(730)
   maxBookingDays?: number;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: false,
+    description:
+      'Si es true, un turno reservado sin seña (cuando el servicio admite pago) queda provisional y puede ser desplazado por otro cliente que pague la seña. false (default) = el turno sin seña queda firme.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowProvisionalBookings?: boolean;
 }
 
 export class InviteProfessionalDto {

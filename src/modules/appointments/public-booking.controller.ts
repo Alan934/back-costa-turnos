@@ -63,6 +63,7 @@ export class PublicBookingController {
       address: this.resolveAddress(membership, comercio),
       bio: settings.bio ?? null,
       phone: settings.phone ?? null,
+      allowProvisionalBookings: membership.allowProvisionalBookings,
     };
   }
 
@@ -128,6 +129,9 @@ export class PublicBookingController {
     const addressByMembership = new Map(
       members.map((m) => [m.id, this.resolveAddress(m, comercio)]),
     );
+    const provisionalByMembership = new Map(
+      members.map((m) => [m.id, m.allowProvisionalBookings]),
+    );
     return list.map((s) => ({
       serviceId: s.id,
       name: s.name,
@@ -145,6 +149,7 @@ export class PublicBookingController {
         professionalId: a.professionalId,
         displayName: a.displayName,
         address: addressByMembership.get(a.membershipId) ?? comercio.address,
+        allowProvisionalBookings: provisionalByMembership.get(a.membershipId) ?? false,
       })),
     }));
   }

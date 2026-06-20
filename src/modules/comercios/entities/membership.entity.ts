@@ -66,4 +66,14 @@ export class Membership extends BaseEntity {
   @ApiProperty({ type: Number, example: 30 })
   @Column({ name: 'max_booking_days', type: 'int', default: 0 })
   maxBookingDays!: number;
+
+  /**
+   * Si está activo, un turno reservado SIN seña (cuando el servicio además admite
+   * pago) queda provisional: puede ser desplazado por otro cliente que pague la
+   * seña. Si está desactivado (default), el turno sin seña queda firme y nadie lo
+   * puede desplazar. Lo define el profesional para su agenda en este comercio.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'allow_provisional_bookings', type: 'boolean', default: false })
+  allowProvisionalBookings!: boolean;
 }

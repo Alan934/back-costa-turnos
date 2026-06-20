@@ -83,6 +83,7 @@ describe('Booking flow (e2e)', () => {
         allowDeposit: true,
         allowFullPayment: true,
         allowNoPayment: true,
+        allowCash: true,
         depositAmountCents: 200000,
       })
       .expect(201);
@@ -111,10 +112,22 @@ describe('Booking flow (e2e)', () => {
   });
 
   it('reserva provisional y luego es desplazada por un pago de sena', async () => {
+    // 0) habilitar reservas provisionales en la membresía (default: false).
+    const mine = await http
+      .get('/v1/comercios/memberships/mine')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const comercioId = mine.body[0].comercioId;
+    await http
+      .patch(`/v1/comercios/${comercioId}/membership`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ allowProvisionalBookings: true })
+      .expect(200);
+
     // 1) reserva provisional (sin sena) via pagina publica
     const prov = await http
       .post(`/r/${slug}/book`)
-      .send({ staffId, serviceId, startAt: slotStart, fullName: 'Cliente A' })
+      .send({ staffId, serviceId, startAt: slotStart, fullName: 'Cliente A', phone: '2612000001' })
       .expect(201);
     expect(prov.body.isProvisional).toBe(true);
     const provId = prov.body.id;
@@ -146,6 +159,9 @@ describe('Booking flow (e2e)', () => {
   describe('F4: reserva con MercadoPago crea el turno recién al acreditar', () => {
     let mpSlot: string;
     let mpPaymentId: string;
+    // Ref de MP único por corrida: uq_payment_mp_ref es global y la DB local es
+    // persistente, así que un id fijo colisionaría entre ejecuciones.
+    const mpExternalId = `mp-test-${Date.now()}`;
 
     it('reserva con method=mercadopago NO crea el turno (appointment null) y devuelve initPoint', async () => {
       // Tomar un slot distinto al del bloque anterior (dia +2) para no chocar.
@@ -159,7 +175,13 @@ describe('Booking flow (e2e)', () => {
 
       const res = await http
         .post(`/r/${slug}/book-with-deposit`)
-        .send({ serviceId, startAt: mpSlot, fullName: 'Cliente MP', method: 'mercadopago' })
+        .send({
+          serviceId,
+          startAt: mpSlot,
+          fullName: 'Cliente MP',
+          phone: '2612000002',
+          method: 'mercadopago',
+        })
         .expect(201);
 
       expect(res.body.appointment).toBeNull();
@@ -178,14 +200,14 @@ describe('Booking flow (e2e)', () => {
     it('el horario queda en hold: una reserva casual al mismo slot da 409', async () => {
       await http
         .post(`/r/${slug}/book`)
-        .send({ staffId, serviceId, startAt: mpSlot, fullName: 'Colado' })
+        .send({ staffId, serviceId, startAt: mpSlot, fullName: 'Colado', phone: '2612000003' })
         .expect(409);
     });
 
     it('el webhook aprobado crea el turno (confirmed) y libera el hold', async () => {
       await http
         .post('/v1/payments/mp/webhook')
-        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: 'mp-test-1' })
+        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: mpExternalId })
         .expect(200);
 
       const list = await http
@@ -201,7 +223,7 @@ describe('Booking flow (e2e)', () => {
     it('reenviar el mismo webhook es idempotente (no duplica el turno)', async () => {
       await http
         .post('/v1/payments/mp/webhook')
-        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: 'mp-test-1' })
+        .send({ external_reference: `pay:${mpPaymentId}`, status: 'approved', id: mpExternalId })
         .expect(200);
 
       const list = await http
