@@ -37,7 +37,8 @@ export class CreateScheduleRuleDto {
 
   /**
    * Servicios a los que aplica esta regla. Vacío/omitido = aplica a TODOS los
-   * servicios de la membresía. Solo tiene efecto en reglas de trabajo (work).
+   * servicios de la membresía. Aplica tanto a franjas de trabajo (work: oferta solo
+   * esos servicios) como a descansos (break: bloquea solo esos servicios).
    */
   @ApiPropertyOptional({ type: [String], format: 'uuid' })
   @IsOptional()

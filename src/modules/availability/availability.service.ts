@@ -502,18 +502,20 @@ export class AvailabilityService {
     }
 
     const rules = await this.scheduleRules.find({ where: { membershipId } });
-    // Reglas de trabajo que aplican a este servicio (mapeo vacío = todas).
-    const ruleServiceMap = await this.serviceIdsByRule(
-      rules.filter((r) => r.kind === ScheduleRuleKind.Work).map((r) => r.id),
-    );
+    // Mapeo regla->servicios para TODAS las reglas (work y break). Mapeo vacío =
+    // la regla aplica a todos los servicios. Tanto las franjas de trabajo como los
+    // descansos pueden dirigirse a servicios concretos.
+    const ruleServiceMap = await this.serviceIdsByRule(rules.map((r) => r.id));
 
     const workByDay = new Map<number, ScheduleRule[]>();
     const breaksByDay = new Map<number, ScheduleRule[]>();
     for (const rule of rules) {
+      const mapped = ruleServiceMap.get(rule.id);
+      // Regla dirigida a servicios concretos que NO incluyen este: no aplica.
+      // Para un descanso parcial significa que este servicio sigue reservable en
+      // ese rango; para una franja de trabajo, que no oferta este servicio.
+      if (mapped && mapped.length > 0 && !mapped.includes(serviceId)) continue;
       if (rule.kind === ScheduleRuleKind.Work) {
-        const mapped = ruleServiceMap.get(rule.id);
-        // Si la regla está mapeada a servicios específicos y este no está, se ignora.
-        if (mapped && mapped.length > 0 && !mapped.includes(serviceId)) continue;
         const list = workByDay.get(rule.dayOfWeek) ?? [];
         list.push(rule);
         workByDay.set(rule.dayOfWeek, list);
