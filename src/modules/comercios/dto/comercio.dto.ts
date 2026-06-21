@@ -12,6 +12,7 @@ import {
   MinLength,
 } from 'class-validator';
 
+import { InvitationStatus } from '@/common/enums';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -114,6 +115,32 @@ export class AcceptInvitationDto {
   @IsString()
   @IsNotEmpty()
   token!: string;
+}
+
+/**
+ * Datos públicos de una invitación, para que la landing decida si el profesional
+ * debe registrarse o ingresar. No expone datos sensibles del comercio ni del usuario.
+ */
+export class InvitationPreviewDto {
+  @ApiProperty({ example: 'Studio 34' })
+  comercioName!: string;
+
+  @ApiProperty({ example: 'pro@email.com', description: 'email invitado (pre-carga el form)' })
+  email!: string;
+
+  @ApiProperty({ enum: InvitationStatus, enumName: 'InvitationStatus' })
+  status!: InvitationStatus;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  expiresAt!: Date;
+
+  @ApiProperty({
+    description: 'true si ya existe una cuenta con login para ese email → guiar a ingresar',
+  })
+  accountExists!: boolean;
+
+  @ApiProperty({ description: 'true si esa cuenta ya tiene perfil de profesional (informativo)' })
+  isProfessional!: boolean;
 }
 
 /** Admin crea una cuenta comercial + su comercio. */

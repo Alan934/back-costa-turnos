@@ -8,11 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ComercioOwnerGuard } from '@/common/guards/comercio-owner.guard';
 import { ComercioMembershipGuard } from '@/common/guards/comercio-membership.guard';
+import { Public } from '@/common/decorators/public.decorator';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { CurrentComercio, CurrentMembership } from '@/common/decorators/current-comercio.decorator';
 import { ComerciosService } from './comercios.service';
@@ -22,6 +24,7 @@ import { Membership } from './entities/membership.entity';
 import { ComercioInvitation } from './entities/comercio-invitation.entity';
 import {
   AcceptInvitationDto,
+  InvitationPreviewDto,
   InviteProfessionalDto,
   UpdateComercioDto,
   UpdateMembershipDto,
@@ -45,12 +48,32 @@ export class ComerciosController {
     return this.comercios.listMyMemberships(professionalId);
   }
 
+  @ApiOperation({
+    summary: 'Preview público de una invitación (landing)',
+    description:
+      'Sin auth. Devuelve lo necesario para que la landing decida registrarse vs ingresar. ' +
+      'Token inexistente → 404; cancelado o vencido → 410.',
+  })
+  @ApiResponse({ status: 200, type: InvitationPreviewDto })
+  @ApiResponse({ status: 404, description: 'Invitación no encontrada' })
+  @ApiResponse({ status: 410, description: 'Invitación cancelada o vencida' })
+  @Public()
+  @Get('invitations/preview')
+  previewInvitation(@Query('token') token: string) {
+    return this.invitations.preview(token);
+  }
+
   @ApiOperation({ summary: 'Aceptar una invitación a un comercio' })
   @ApiResponse({ status: 201, type: Membership })
   @ApiResponse({ status: 400, description: 'Invitación inválida/vencida o no sos profesional' })
+  @ApiResponse({ status: 409, description: 'El email de la cuenta no coincide con el invitado' })
   @Post('invitations/accept')
-  accept(@CurrentAccount('sub') accountId: string, @Body() dto: AcceptInvitationDto) {
-    return this.invitations.accept(accountId, dto.token);
+  accept(
+    @CurrentAccount('sub') accountId: string,
+    @CurrentAccount('email') email: string,
+    @Body() dto: AcceptInvitationDto,
+  ) {
+    return this.invitations.accept(accountId, email, dto.token);
   }
 
   @ApiOperation({
