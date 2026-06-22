@@ -13,6 +13,9 @@ import { MercadoPagoOAuthService } from './providers/mercadopago-oauth.service';
 /** external_reference de las señas/turnos en MercadoPago. */
 const PAYMENT_REF_PREFIX = 'pay:';
 
+/** Métodos de cobro fuera del sistema: el profesional confirma el cobro manualmente. */
+const OFF_SYSTEM_METHODS = [PaymentMethod.Cash, PaymentMethod.Transfer];
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -61,13 +64,16 @@ export class PaymentsService {
   }
 
   /**
-   * Marca un pago en efectivo como cobrado (lo hace el profesional). Admite venir de
-   * un pago pendiente o de un pagaré (Deferred) que el cliente finalmente pagó.
+   * Marca un pago fuera de sistema (efectivo/transferencia) como cobrado (lo hace el
+   * profesional). Admite venir de un pago pendiente o de un pagaré (Deferred) que el
+   * cliente finalmente pagó.
    */
   async markCashPaid(tenantId: string, id: string): Promise<Payment> {
     const payment = await this.findById(tenantId, id);
-    if (payment.method !== PaymentMethod.Cash) {
-      throw new BadRequestException('Solo se marcan manualmente los pagos en efectivo');
+    if (!OFF_SYSTEM_METHODS.includes(payment.method)) {
+      throw new BadRequestException(
+        'Solo se marcan manualmente los cobros en efectivo o transferencia',
+      );
     }
     if (![PaymentStatus.Pending, PaymentStatus.Deferred].includes(payment.status)) {
       throw new BadRequestException('El pago no está pendiente de cobro');
@@ -79,13 +85,14 @@ export class PaymentsService {
   }
 
   /**
-   * Marca un pago en efectivo como pagaré (el cliente quedó debiendo / pagará después).
-   * No cuenta como ingreso; aparece en el cierre de caja como pendiente de cobro.
+   * Marca un pago fuera de sistema (efectivo/transferencia) como pagaré (el cliente quedó
+   * debiendo / pagará después). No cuenta como ingreso; aparece en el cierre de caja como
+   * pendiente de cobro.
    */
   async markCashDeferred(tenantId: string, id: string, note?: string): Promise<Payment> {
     const payment = await this.findById(tenantId, id);
-    if (payment.method !== PaymentMethod.Cash) {
-      throw new BadRequestException('Solo se difieren los pagos en efectivo');
+    if (!OFF_SYSTEM_METHODS.includes(payment.method)) {
+      throw new BadRequestException('Solo se difieren los cobros en efectivo o transferencia');
     }
     if (![PaymentStatus.Pending, PaymentStatus.Deferred].includes(payment.status)) {
       throw new BadRequestException('El pago ya no está pendiente de cobro');

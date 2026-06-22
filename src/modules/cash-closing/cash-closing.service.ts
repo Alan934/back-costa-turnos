@@ -13,7 +13,9 @@ import { CashClosingDto, PendingCashDto, PendingCompletionDto } from './dto/cash
 
 // Turnos que ocupan agenda y deberían haberse cerrado (pasado su fin).
 const OPEN_STATUSES = [AppointmentStatus.Confirmed, AppointmentStatus.InProgress];
-// Pagos en efectivo aún no cobrados.
+// Métodos de cobro fuera del sistema (el profesional confirma el cobro): efectivo + transferencia.
+const OFF_SYSTEM_METHODS = [PaymentMethod.Cash, PaymentMethod.Transfer];
+// Pagos fuera de sistema aún no cobrados.
 const UNPAID_CASH = [PaymentStatus.Pending, PaymentStatus.Deferred];
 
 @Injectable()
@@ -40,7 +42,11 @@ export class CashClosingService {
         order: { startAt: 'ASC' },
       }),
       this.payments.find({
-        where: { professionalId: tenantId, method: PaymentMethod.Cash, status: In(UNPAID_CASH) },
+        where: {
+          professionalId: tenantId,
+          method: In(OFF_SYSTEM_METHODS),
+          status: In(UNPAID_CASH),
+        },
         order: { createdAt: 'DESC' },
       }),
     ]);
@@ -102,7 +108,7 @@ export class CashClosingService {
     const collectedPayments = await this.payments.find({
       where: {
         professionalId: tenantId,
-        method: PaymentMethod.Cash,
+        method: In(OFF_SYSTEM_METHODS),
         status: PaymentStatus.Paid,
         paidAt: MoreThanOrEqual(periodStart),
       },

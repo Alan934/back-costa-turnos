@@ -129,9 +129,7 @@ export class PublicBookingController {
     const addressByMembership = new Map(
       members.map((m) => [m.id, this.resolveAddress(m, comercio)]),
     );
-    const provisionalByMembership = new Map(
-      members.map((m) => [m.id, m.allowProvisionalBookings]),
-    );
+    const provisionalByMembership = new Map(members.map((m) => [m.id, m.allowProvisionalBookings]));
     return list.map((s) => ({
       serviceId: s.id,
       name: s.name,
@@ -143,7 +141,9 @@ export class PublicBookingController {
       allowFullPayment: s.allowFullPayment,
       allowNoPayment: s.allowNoPayment,
       allowCash: s.allowCash,
+      allowTransfer: s.allowTransfer,
       depositAmountCents: s.depositAmountCents,
+      pricing: s.pricing,
       professionals: (s.assignedMemberships ?? []).map((a) => ({
         membershipId: a.membershipId,
         professionalId: a.professionalId,

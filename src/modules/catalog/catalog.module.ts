@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '@/modules/files/files.module';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Service } from './entities/service.entity';
 import { ServiceMembership } from './entities/service-membership.entity';
 import { ServiceCombinationRule } from './entities/service-combination-rule.entity';
@@ -11,7 +12,7 @@ import { ComercioCatalogController } from './comercio-catalog.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Service, ServiceMembership, ServiceCombinationRule]),
+    TypeOrmModule.forFeature([Service, ServiceMembership, ServiceCombinationRule, Professional]),
     FilesModule,
   ],
   controllers: [CatalogController, ComercioCatalogController],

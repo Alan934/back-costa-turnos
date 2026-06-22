@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, OneToOne } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
 import { DepositMode } from '@/common/enums';
+import { NumericTransformer } from '@/common/numeric.transformer';
 import { Account } from '@/modules/identity/entities/account.entity';
 
 export interface PublicPageSettings {
@@ -54,6 +55,26 @@ export class Professional extends BaseEntity {
     default: DepositMode.None,
   })
   defaultDepositMode!: DepositMode;
+
+  /**
+   * IVA por defecto (%) que se le cobra al cliente en pagos por Mercado Pago, para cubrir
+   * la comisión de Checkout. Editable; cada servicio puede sobrescribirlo. Default 4.5.
+   */
+  @ApiProperty({ type: Number, example: 4.5 })
+  @Column({
+    name: 'default_vat_percent',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    default: 4.5,
+    transformer: NumericTransformer,
+  })
+  defaultVatPercent!: number;
+
+  /** true = el IVA se le suma al cliente; false = el profesional lo absorbe (no se cobra). */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'vat_charged_to_client', type: 'boolean', default: true })
+  vatChargedToClient!: boolean;
 
   @ApiProperty({ type: Number })
   @Column({ name: 'cancellation_window_hours', type: 'integer', default: 24 })

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Service } from '@/modules/catalog/entities/service.entity';
+import { Service, ServicePricing } from '@/modules/catalog/entities/service.entity';
 
 /** Un profesional del comercio en la página pública (para elegir con quién reservar). */
 export class PublicProfessionalDto {
@@ -148,8 +148,17 @@ export class PublicServiceDto {
   @ApiProperty({ type: Boolean })
   allowCash!: boolean;
 
+  @ApiProperty({ type: Boolean })
+  allowTransfer!: boolean;
+
   @ApiPropertyOptional({ type: Number, nullable: true })
   depositAmountCents!: number | null;
+
+  @ApiPropertyOptional({
+    type: ServicePricing,
+    description: 'Precios con/sin IVA (full y seña). El IVA solo aplica a pagos por Mercado Pago.',
+  })
+  pricing?: ServicePricing;
 
   @ApiProperty({ type: PublicServiceProfessionalDto, isArray: true })
   professionals!: PublicServiceProfessionalDto[];

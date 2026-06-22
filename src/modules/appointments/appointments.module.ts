@@ -10,6 +10,7 @@ import { PaymentsModule } from '@/modules/payments/payments.module';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { Appointment } from './entities/appointment.entity';
@@ -30,6 +31,7 @@ import { AppointmentsJobs } from './appointments.jobs';
       Service,
       ServiceCombinationRule,
       Staff,
+      Professional,
       Payment,
       ProfessionalClient,
     ]),

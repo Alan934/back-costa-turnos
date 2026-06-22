@@ -1,6 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
+import { NumericTransformer } from '@/common/numeric.transformer';
 import { PaymentMethod, PaymentStatus, PaymentType } from '@/common/enums';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
@@ -49,9 +50,27 @@ export class Payment extends BaseEntity {
   })
   type!: PaymentType;
 
+  /** Total cobrado al cliente (base + IVA en Mercado Pago; solo base en efectivo/transferencia). */
   @ApiProperty({ type: Number })
   @Column({ name: 'amount_cents', type: 'integer' })
   amountCents!: number;
+
+  /** IVA aplicado (%) — solo Mercado Pago. 0 en efectivo/transferencia. */
+  @ApiProperty({ type: Number })
+  @Column({
+    name: 'vat_percent',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    default: 0,
+    transformer: NumericTransformer,
+  })
+  vatPercent!: number;
+
+  /** Porción de IVA incluida en amount_cents (centavos). Base = amount_cents - vat_amount_cents. */
+  @ApiProperty({ type: Number })
+  @Column({ name: 'vat_amount_cents', type: 'integer', default: 0 })
+  vatAmountCents!: number;
 
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
   @Column({

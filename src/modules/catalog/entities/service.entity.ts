@@ -1,6 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
+import { NumericTransformer } from '@/common/numeric.transformer';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
@@ -16,6 +17,40 @@ export class ServiceAssignedMembership {
 
   @ApiProperty({ example: 'Lucía Pérez' })
   displayName!: string;
+}
+
+/** Desglose de un monto: base (sin IVA), IVA y total (con IVA). Solo MP lleva IVA. */
+export class ServicePriceBreakdown {
+  @ApiProperty({ type: Number, description: 'Precio sin IVA (centavos).' })
+  baseCents!: number;
+
+  @ApiProperty({ type: Number, description: 'IVA en centavos (0 si el profesional lo absorbe).' })
+  vatAmountCents!: number;
+
+  @ApiProperty({ type: Number, description: 'Total con IVA (centavos) = base + IVA.' })
+  totalCents!: number;
+}
+
+/** Precios con/sin IVA del servicio (campo derivado para el front). */
+export class ServicePricing {
+  @ApiProperty({ type: Number, description: 'IVA efectivo (%) aplicado a pagos por Mercado Pago.' })
+  vatPercent!: number;
+
+  @ApiProperty({
+    type: Boolean,
+    description: 'true = el IVA se cobra al cliente; false = absorbido.',
+  })
+  vatChargedToClient!: boolean;
+
+  @ApiProperty({ type: ServicePriceBreakdown, description: 'Pago completo por Mercado Pago.' })
+  full!: ServicePriceBreakdown;
+
+  @ApiPropertyOptional({
+    type: ServicePriceBreakdown,
+    nullable: true,
+    description: 'Seña por Mercado Pago (null si el servicio no admite seña).',
+  })
+  deposit!: ServicePriceBreakdown | null;
 }
 
 /**
@@ -109,6 +144,32 @@ export class Service extends BaseEntity {
   @Column({ name: 'allow_cash', type: 'boolean', default: false })
   allowCash!: boolean;
 
+  /**
+   * Permite reservar pagando por transferencia / QR / alias / CVU. Cobro fuera del sistema:
+   * funciona igual que efectivo (sin IVA, turno fijo, el profesional confirma el cobro).
+   */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'allow_transfer', type: 'boolean', default: false })
+  allowTransfer!: boolean;
+
+  // ---- IVA (solo pagos por Mercado Pago). null = hereda del profesional. ----
+  /** IVA (%) para este servicio. null = usa el default del profesional. */
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  @Column({
+    name: 'vat_percent',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+    transformer: NumericTransformer,
+  })
+  vatPercent!: number | null;
+
+  /** Si el IVA se cobra al cliente. null = hereda del profesional. */
+  @ApiPropertyOptional({ type: Boolean, nullable: true })
+  @Column({ name: 'vat_charged_to_client', type: 'boolean', nullable: true })
+  vatChargedToClient!: boolean | null;
+
   /** Monto de la seña (centavos). Requerido si allow_deposit. */
   @ApiPropertyOptional({ type: Number, nullable: true })
   @Column({ name: 'deposit_amount_cents', type: 'integer', nullable: true })
@@ -140,4 +201,11 @@ export class Service extends BaseEntity {
    */
   @ApiPropertyOptional({ type: [String], description: 'URLs firmadas (temporales) de imageKeys' })
   imageUrls?: string[];
+
+  /**
+   * Campo derivado (no persistido): precios con/sin IVA. Lo rellena CatalogService en las
+   * lecturas, resolviendo el IVA efectivo (override del servicio o default del profesional).
+   */
+  @ApiPropertyOptional({ type: ServicePricing })
+  pricing?: ServicePricing;
 }

@@ -3,10 +3,12 @@ import {
   IsBoolean,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
 import { DepositMode } from '@/common/enums';
@@ -60,6 +62,24 @@ export class UpdateProfessionalDto {
   @IsOptional()
   @IsEnum(DepositMode)
   defaultDepositMode?: DepositMode;
+
+  @ApiPropertyOptional({
+    example: 4.5,
+    description: 'IVA por defecto (%) cobrado al cliente en pagos por Mercado Pago (0–100).',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  defaultVatPercent?: number;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'true = el IVA se le suma al cliente; false = el profesional lo absorbe.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  vatChargedToClient?: boolean;
 
   @ApiPropertyOptional({ example: 24 })
   @IsOptional()

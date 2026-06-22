@@ -29,6 +29,8 @@ import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { CatalogService } from '@/modules/catalog/catalog.service';
+import { computePrice, resolveServiceVat } from '@/modules/catalog/pricing';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { ServiceCombinationRulesService } from '@/modules/catalog/service-combination-rules.service';
 import { AvailabilityService } from '@/modules/availability/availability.service';
@@ -52,6 +54,10 @@ const ACTIVE_STATUSES = [
   AppointmentStatus.InProgress,
 ];
 
+// Métodos de cobro fuera del sistema (efectivo, transferencia/QR): precio base sin IVA,
+// turno fijo, el profesional confirma el cobro en persona (cierre de caja).
+const OFF_SYSTEM_METHODS = [PaymentMethod.Cash, PaymentMethod.Transfer];
+
 /** Minutos que un horario queda reservado (hold) mientras se paga con MercadoPago. */
 const HOLD_TTL_MINUTES = 15;
 
@@ -64,6 +70,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly appointments: Repository<Appointment>,
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    @InjectRepository(Professional)
+    private readonly professionals: Repository<Professional>,
     @InjectRepository(ServiceCombinationRule)
     private readonly combinationRuleRepo: Repository<ServiceCombinationRule>,
     @InjectRepository(Payment)
@@ -536,24 +544,27 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }));
     const addonDuration = addonPricings.reduce((s, a) => s + a.service.durationMinutes, 0);
 
-    const isCash = dto.method === PaymentMethod.Cash;
+    const isOffSystem = OFF_SYSTEM_METHODS.includes(dto.method);
 
-    // Resuelve monto y tipo. El efectivo siempre cobra el precio completo del
-    // servicio (tal cual lo cargó el profesional, sin IVA/recargo), sin importar
+    // Resuelve monto base y tipo. Efectivo/transferencia siempre cobran el precio
+    // completo del servicio (tal cual lo cargó el profesional, sin IVA), sin importar
     // paymentOption. Online (MP) respeta la opción elegida (seña o pago completo).
-    let amountCents: number;
+    let baseCents: number;
     let paymentType: PaymentType;
-    if (isCash) {
-      if (!service.allowCash) {
+    if (isOffSystem) {
+      if (dto.method === PaymentMethod.Cash && !service.allowCash) {
         throw new BadRequestException('Este servicio no admite pago en efectivo');
       }
-      amountCents = service.priceCents;
+      if (dto.method === PaymentMethod.Transfer && !service.allowTransfer) {
+        throw new BadRequestException('Este servicio no admite pago por transferencia');
+      }
+      baseCents = service.priceCents;
       paymentType = PaymentType.Service;
     } else if (option === PaymentOption.Full) {
       if (!service.allowFullPayment) {
         throw new BadRequestException('Este servicio no admite pago completo');
       }
-      amountCents = service.priceCents;
+      baseCents = service.priceCents;
       paymentType = PaymentType.Service;
     } else {
       if (!service.allowDeposit) {
@@ -562,9 +573,23 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       if (!service.depositAmountCents || service.depositAmountCents <= 0) {
         throw new BadRequestException('El servicio no tiene monto de seña configurado');
       }
-      amountCents = service.depositAmountCents;
+      baseCents = service.depositAmountCents;
       paymentType = PaymentType.Deposit;
     }
+
+    // IVA: solo en pagos por Mercado Pago, sobre el monto que se cobra (seña o total).
+    // En efectivo/transferencia no hay IVA (cobro fuera del sistema). Se aplica el IVA
+    // efectivo del servicio (override) o, si es null, el default del profesional.
+    let vatPercent = 0;
+    let vatAmountCents = 0;
+    if (!isOffSystem) {
+      const professional = await this.professionals.findOne({ where: { id: tenantId } });
+      const vat = resolveServiceVat(service, professional);
+      vatPercent = vat.percent;
+      vatAmountCents = computePrice(baseCents, vat.percent, vat.chargedToClient).vatAmountCents;
+    }
+    // amountCents = lo que efectivamente paga el cliente (base + IVA en MP).
+    const amountCents = baseCents + vatAmountCents;
 
     const totalDuration = service.durationMinutes + addonDuration;
     const startAt = new Date(dto.startAt);
@@ -613,11 +638,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         const provToKeep = service.capacity - firmOccupied - 1;
         const provToBump = provSame.slice(Math.max(0, provToKeep));
 
-        // EFECTIVO: el turno se confirma firme en el acto (no hay checkout) y bumpea
-        // provisionales que sobren. El Payment queda PENDIENTE: el cobro se confirma en
-        // persona al finalizar el turno (ver complete() / cierre de caja), para no dar
-        // por cobrado dinero que todavía no se recibió.
-        if (isCash) {
+        // EFECTIVO/TRANSFERENCIA: el turno se confirma firme en el acto (no hay checkout)
+        // y bumpea provisionales que sobren. El Payment queda PENDIENTE: el cobro se
+        // confirma en persona al finalizar el turno (ver complete() / cierre de caja),
+        // para no dar por cobrado dinero que todavía no se recibió. Nunca lleva IVA.
+        if (isOffSystem) {
           for (const prov of provToBump) {
             prov.status = AppointmentStatus.Cancelled;
             prov.cancellationReason = CancellationReason.Bumped;
@@ -670,6 +695,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
               personId,
               type: paymentType,
               amountCents,
+              vatPercent: 0,
+              vatAmountCents: 0,
               method: dto.method,
               status: PaymentStatus.Pending,
               paidAt: null,
@@ -696,6 +723,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
             personId,
             type: paymentType,
             amountCents,
+            vatPercent,
+            vatAmountCents,
             method: dto.method,
             status: PaymentStatus.Pending,
             paidAt: null,
@@ -958,10 +987,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   }
 
   /**
-   * Confirma el cobro en efectivo de un turno al finalizarlo: marca el pago en
-   * efectivo PENDIENTE del turno como cobrado (`Paid`) o como pagaré (`Deferred`,
-   * el cliente quedó debiendo). No-op si el turno no tiene un pago en efectivo
-   * pendiente (p. ej. se pagó por MercadoPago o ya se cerró antes).
+   * Confirma el cobro fuera de sistema (efectivo/transferencia) de un turno al
+   * finalizarlo: marca el pago PENDIENTE del turno como cobrado (`Paid`) o como
+   * pagaré (`Deferred`, el cliente quedó debiendo). No-op si el turno no tiene un
+   * pago off-system pendiente (p. ej. se pagó por MercadoPago o ya se cerró antes).
    */
   private async applyCashOutcome(
     tenantId: string,
@@ -973,7 +1002,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       where: {
         professionalId: tenantId,
         appointmentId,
-        method: PaymentMethod.Cash,
+        method: In(OFF_SYSTEM_METHODS),
         status: PaymentStatus.Pending,
       },
     });

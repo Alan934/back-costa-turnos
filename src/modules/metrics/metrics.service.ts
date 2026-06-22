@@ -49,19 +49,21 @@ export class MetricsService {
 
     // Ingresos: solo pagos efectivamente cobrados (Paid), por fecha de cobro. Incluye
     // señas, MercadoPago y efectivo confirmado; el efectivo no cobrado/pagaré no suma.
+    // Se excluye el IVA (pass-through para cubrir la comisión MP): ingreso = base.
     const paidPayments = await this.payments.find({
       where: {
         professionalId: tenantId,
         status: PaymentStatus.Paid,
         paidAt: Between(new Date(periodStart), new Date(periodEnd)),
       },
-      select: ['amountCents', 'paidAt'],
+      select: ['amountCents', 'vatAmountCents', 'paidAt'],
     });
-    // Efectivo pendiente de cobro (pendiente + pagaré), no acotado al período.
+    // Cobros fuera de sistema pendientes (efectivo/transferencia, pendiente + pagaré),
+    // no acotado al período. Sin IVA, así que amountCents = base.
     const unpaidCash = await this.payments.find({
       where: {
         professionalId: tenantId,
-        method: PaymentMethod.Cash,
+        method: In([PaymentMethod.Cash, PaymentMethod.Transfer]),
         status: In([PaymentStatus.Pending, PaymentStatus.Deferred]),
       },
       select: ['amountCents'],
@@ -103,7 +105,7 @@ export class MetricsService {
           const t = p.paidAt?.getTime() ?? 0;
           return t >= b.start && t <= b.end;
         })
-        .reduce((acc, p) => acc + p.amountCents, 0);
+        .reduce((acc, p) => acc + (p.amountCents - p.vatAmountCents), 0);
       return { label: b.label, cents };
     });
 

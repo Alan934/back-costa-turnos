@@ -6,10 +6,13 @@ import {
   IsBoolean,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
@@ -83,6 +86,38 @@ export class CreateServiceDto {
   @IsOptional()
   @IsBoolean()
   allowCash?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'Permitir reservar por transferencia/QR (precio completo, sin IVA)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowTransfer?: boolean;
+
+  // ---- IVA (solo Mercado Pago). Enviar null para volver a heredar del profesional. ----
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    example: 6.45,
+    description: 'IVA (%) de este servicio. null = hereda el default del profesional.',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  vatPercent?: number | null;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description: 'Si el IVA se cobra al cliente en este servicio. null = hereda del profesional.',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsBoolean()
+  vatChargedToClient?: boolean | null;
 
   @ApiPropertyOptional({ example: 200000, description: 'monto de la seña en centavos' })
   @IsOptional()

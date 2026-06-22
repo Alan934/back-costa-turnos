@@ -5,8 +5,10 @@ import { MembershipStatus } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { FilesService } from '@/modules/files/files.service';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Service, ServiceAssignedMembership } from './entities/service.entity';
 import { ServiceMembership } from './entities/service-membership.entity';
+import { buildServicePricing } from './pricing';
 import { CreateServiceDto, UpdateServiceDto } from './dto/service.dto';
 
 interface PaymentFlags {
@@ -14,6 +16,7 @@ interface PaymentFlags {
   allowFullPayment: boolean;
   allowNoPayment: boolean;
   allowCash: boolean;
+  allowTransfer: boolean;
   depositAmountCents: number | null;
 }
 
@@ -24,15 +27,23 @@ export class CatalogService {
     private readonly services: Repository<Service>,
     @InjectRepository(ServiceMembership)
     private readonly serviceMemberships: Repository<ServiceMembership>,
+    @InjectRepository(Professional)
+    private readonly professionals: Repository<Professional>,
     private readonly comercios: ComerciosService,
     private readonly files: FilesService,
   ) {}
 
   /** Al menos una opción de pago habilitada; si hay seña, requiere monto. */
   private assertPaymentOptions(f: PaymentFlags): void {
-    if (!f.allowDeposit && !f.allowFullPayment && !f.allowNoPayment && !f.allowCash) {
+    if (
+      !f.allowDeposit &&
+      !f.allowFullPayment &&
+      !f.allowNoPayment &&
+      !f.allowCash &&
+      !f.allowTransfer
+    ) {
       throw new BadRequestException(
-        'El servicio debe permitir al menos una opción de pago (seña, pago completo, efectivo o sin pago)',
+        'El servicio debe permitir al menos una opción de pago (seña, pago completo, efectivo, transferencia o sin pago)',
       );
     }
     if (f.allowDeposit && (f.depositAmountCents == null || f.depositAmountCents <= 0)) {
@@ -110,14 +121,24 @@ export class CatalogService {
       map.set(row.serviceId, list);
     }
     for (const s of servicesList) s.assignedMemberships = map.get(s.id) ?? [];
-    return this.attachImageUrls(servicesList);
+    return this.attachDerived(servicesList);
   }
 
-  /** Rellena `imageUrls` (URLs firmadas temporales) a partir de `imageKeys`. */
-  private async attachImageUrls(servicesList: Service[]): Promise<Service[]> {
+  /**
+   * Terminal común de las lecturas: rellena campos derivados (URLs firmadas de imágenes y
+   * desglose de precios con/sin IVA). Lo usan todos los reads (comercio y por membresía).
+   */
+  private async attachDerived(servicesList: Service[]): Promise<Service[]> {
+    if (servicesList.length === 0) return servicesList;
+    // IVA del servicio resuelto contra el default del profesional creador (service.professionalId).
+    const professionalIds = [...new Set(servicesList.map((s) => s.professionalId))];
+    const professionals = await this.professionals.find({ where: { id: In(professionalIds) } });
+    const professionalById = new Map(professionals.map((p) => [p.id, p]));
+
     await Promise.all(
       servicesList.map(async (s) => {
         s.imageUrls = await this.files.getSignedUrlsForKeys(s.imageKeys ?? []);
+        s.pricing = buildServicePricing(s, professionalById.get(s.professionalId));
       }),
     );
     return servicesList;
@@ -170,9 +191,18 @@ export class CatalogService {
     const allowDeposit = dto.allowDeposit ?? false;
     const allowFullPayment = dto.allowFullPayment ?? false;
     const allowCash = dto.allowCash ?? false;
-    const allowNoPayment = dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment && !allowCash);
+    const allowTransfer = dto.allowTransfer ?? false;
+    const allowNoPayment =
+      dto.allowNoPayment ?? (!allowDeposit && !allowFullPayment && !allowCash && !allowTransfer);
     const depositAmountCents = dto.depositAmountCents ?? null;
-    const flags = { allowDeposit, allowFullPayment, allowNoPayment, allowCash, depositAmountCents };
+    const flags = {
+      allowDeposit,
+      allowFullPayment,
+      allowNoPayment,
+      allowCash,
+      allowTransfer,
+      depositAmountCents,
+    };
     this.assertPaymentOptions(flags);
     this.assertAllMembershipsMpConnected(memberships, flags);
 
@@ -191,6 +221,9 @@ export class CatalogService {
         allowFullPayment,
         allowNoPayment,
         allowCash,
+        allowTransfer,
+        vatPercent: dto.vatPercent ?? null,
+        vatChargedToClient: dto.vatChargedToClient ?? null,
         depositAmountCents,
         capacity: dto.capacity ?? 1,
         isActive: true,
@@ -222,6 +255,7 @@ export class CatalogService {
       allowFullPayment: dto.allowFullPayment ?? service.allowFullPayment,
       allowNoPayment: dto.allowNoPayment ?? service.allowNoPayment,
       allowCash: dto.allowCash ?? service.allowCash,
+      allowTransfer: dto.allowTransfer ?? service.allowTransfer,
       depositAmountCents: dto.depositAmountCents ?? service.depositAmountCents,
     };
     this.assertPaymentOptions(flags);
@@ -271,7 +305,7 @@ export class CatalogService {
       .map((r) => r.service)
       .filter((s): s is Service => !!s && s.isActive)
       .sort((a, b) => a.name.localeCompare(b.name));
-    return this.attachImageUrls(list);
+    return this.attachDerived(list);
   }
 
   async listAllByMembership(membershipId: string): Promise<Service[]> {
@@ -283,7 +317,7 @@ export class CatalogService {
       .map((r) => r.service)
       .filter((s): s is Service => !!s)
       .sort((a, b) => a.name.localeCompare(b.name));
-    return this.attachImageUrls(list);
+    return this.attachDerived(list);
   }
 
   async findByMembership(membershipId: string, id: string): Promise<Service> {
@@ -291,7 +325,7 @@ export class CatalogService {
     if (!service || !(await this.isAssigned(id, membershipId))) {
       throw new NotFoundException('Servicio no encontrado');
     }
-    return (await this.attachImageUrls([service]))[0];
+    return (await this.attachDerived([service]))[0];
   }
 
   /**

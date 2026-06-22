@@ -114,6 +114,8 @@ export enum PaymentOption {
 export enum PaymentMethod {
   Cash = 'cash',
   MercadoPago = 'mercadopago',
+  /** Transferencia / QR / alias / CVU: cobro fuera del sistema (como efectivo, sin IVA). */
+  Transfer = 'transfer',
 }
 
 export enum PaymentStatus {
