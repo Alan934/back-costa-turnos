@@ -12,6 +12,8 @@ import {
 import { CancellationReason, CashOutcome, PaymentMethod, PaymentOption } from '@/common/enums';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
+import { Payment } from '@/modules/payments/entities/payment.entity';
+import { Appointment } from '../entities/appointment.entity';
 
 /** Datos del cliente: o un personId existente, o info para find-or-create. */
 export class ClientRefDto {
@@ -165,4 +167,31 @@ export class CancelAppointmentDto {
   @IsOptional()
   @IsEnum(CancellationReason)
   reason?: CancellationReason;
+}
+
+/**
+ * Respuesta de los endpoints book-with-deposit.
+ * - `appointment`: el turno creado. Es `null` con method=mercadopago (el turno se crea
+ *   recién al acreditarse el pago vía webhook). Trae `isProvisional` y, en reservas
+ *   "cualquiera", `professionalDisplayName` (el profesional asignado).
+ * - `payment`: el pago. `status='pending'` en efectivo/transferencia (lo confirma el
+ *   profesional) y en mercadopago hasta que se acredita.
+ * - `mpInitPoint`: solo con method=mercadopago, URL de checkout a la que redirigir.
+ */
+export class BookWithDepositResultDto {
+  @ApiPropertyOptional({
+    type: Appointment,
+    nullable: true,
+    description: 'Turno creado. null con method=mercadopago (se crea al acreditarse el pago).',
+  })
+  appointment!: Appointment | null;
+
+  @ApiProperty({ type: Payment })
+  payment!: Payment;
+
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Solo con method=mercadopago: URL de checkout a la que redirigir al cliente.',
+  })
+  mpInitPoint?: string;
 }

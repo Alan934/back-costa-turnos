@@ -29,7 +29,11 @@ import {
   PublicProfessionalDto,
   PublicServiceDto,
 } from './dto/comercio-public-page.dto';
-import { PublicBookDto, PublicBookWithDepositDto } from './dto/appointment.dto';
+import {
+  BookWithDepositResultDto,
+  PublicBookDto,
+  PublicBookWithDepositDto,
+} from './dto/appointment.dto';
 
 /**
  * Página pública de reservas por COMERCIO: /r/:slug. No requiere auth; el slug
@@ -225,9 +229,10 @@ export class PublicBookingController {
   })
   @ApiResponse({
     status: 201,
+    type: BookWithDepositResultDto,
     description:
-      'Objeto { appointment, payment, mpInitPoint? } (ver ruta con membershipId). El profesional ' +
-      'asignado queda en appointment.membershipId/professionalId.',
+      'El profesional asignado queda en appointment.membershipId/professionalId (y en ' +
+      'appointment.professionalDisplayName). Con method=mercadopago appointment es null.',
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
@@ -351,10 +356,11 @@ export class PublicBookingController {
   @ApiOperation({ summary: 'Reservar con seña/pago completo con un profesional del comercio' })
   @ApiResponse({
     status: 201,
+    type: BookWithDepositResultDto,
     description:
-      'Objeto { appointment, payment, mpInitPoint? }. Con method=mercadopago, appointment es ' +
-      'null (el turno se crea al acreditarse el pago vía webhook) y mpInitPoint es la URL de ' +
-      'checkout a la que el front debe redirigir. El horario queda reservado (hold) ~15 min.',
+      'Con method=mercadopago, appointment es null (el turno se crea al acreditarse el pago vía ' +
+      'webhook) y mpInitPoint es la URL de checkout a la que el front debe redirigir. El horario ' +
+      'queda reservado (hold) ~15 min. Con cash/transfer el turno se crea y el pago queda pending.',
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
@@ -432,7 +438,8 @@ export class PublicBookingController {
   })
   @ApiResponse({
     status: 201,
-    description: 'Objeto { appointment, payment, mpInitPoint? } (ver ruta con membershipId).',
+    type: BookWithDepositResultDto,
+    description: 'Ver ruta con membershipId. Con method=mercadopago appointment es null.',
   })
   @Post('book-with-deposit')
   async bookWithDepositFlat(@Param('slug') slug: string, @Body() dto: PublicBookWithDepositDto) {

@@ -12,6 +12,7 @@ import { Appointment } from './entities/appointment.entity';
 import {
   BookAppointmentDto,
   BookWithDepositDto,
+  BookWithDepositResultDto,
   CancelAppointmentDto,
   CompleteAppointmentDto,
 } from './dto/appointment.dto';
@@ -48,10 +49,11 @@ export class AppointmentsController {
   @ApiOperation({ summary: 'Reservar un turno pagando la sena' })
   @ApiResponse({
     status: 201,
+    type: BookWithDepositResultDto,
     description:
-      'Objeto { appointment, payment, mpInitPoint? }. Con method=mercadopago el turno NO se ' +
-      'crea todavía (appointment es null): se crea al acreditarse el pago vía webhook; usar ' +
-      'mpInitPoint para redirigir al checkout. Con method=cash el turno se crea en el acto.',
+      'Con method=mercadopago el turno NO se crea todavía (appointment es null): se crea al ' +
+      'acreditarse el pago vía webhook; usar mpInitPoint para redirigir al checkout. Con ' +
+      'method=cash o transfer el turno se crea en el acto y el pago queda pending.',
   })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
