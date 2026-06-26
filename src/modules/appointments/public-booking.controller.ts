@@ -7,11 +7,14 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
   VERSION_NEUTRAL,
 } from '@nestjs/common';
 
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@/common/decorators/public.decorator';
+import { CurrentAccount } from '@/common/decorators/current-account.decorator';
+import { OptionalJwtAuthGuard } from '@/common/guards/optional-jwt-auth.guard';
 import { CreatedVia } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Comercio } from '@/modules/comercios/entities/comercio.entity';
@@ -214,14 +217,22 @@ export class PublicBookingController {
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('services/:serviceId/book')
   async bookService(
     @Param('slug') slug: string,
     @Param('serviceId') serviceId: string,
     @Body() dto: PublicBookDto,
+    @CurrentAccount('sub') accountId?: string,
   ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
-    return this.appointments.bookForService(comercio.id, serviceId, dto, CreatedVia.ClientSelf);
+    return this.appointments.bookForService(
+      comercio.id,
+      serviceId,
+      dto,
+      CreatedVia.ClientSelf,
+      accountId,
+    );
   }
 
   @ApiOperation({
@@ -236,14 +247,16 @@ export class PublicBookingController {
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('services/:serviceId/book-with-deposit')
   async bookServiceWithDeposit(
     @Param('slug') slug: string,
     @Param('serviceId') serviceId: string,
     @Body() dto: PublicBookWithDepositDto,
+    @CurrentAccount('sub') accountId?: string,
   ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
-    return this.appointments.bookWithDepositForService(comercio.id, serviceId, dto);
+    return this.appointments.bookWithDepositForService(comercio.id, serviceId, dto, accountId);
   }
 
   // ---- Detalle de un profesional del comercio (servicios + ubicación) ----
@@ -342,15 +355,17 @@ export class PublicBookingController {
   @ApiResponse({ status: 201, type: Appointment })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('professionals/:membershipId/book')
   async book(
     @Param('slug') slug: string,
     @Param('membershipId') membershipId: string,
     @Body() dto: PublicBookDto,
+    @CurrentAccount('sub') accountId?: string,
   ) {
     const membership = await this.resolveMembership(slug, membershipId);
     await this.assertBookable(membership.professionalId);
-    return this.appointments.bookForMembership(membershipId, dto, CreatedVia.ClientSelf);
+    return this.appointments.bookForMembership(membershipId, dto, CreatedVia.ClientSelf, accountId);
   }
 
   @ApiOperation({ summary: 'Reservar con seña/pago completo con un profesional del comercio' })
@@ -364,15 +379,17 @@ export class PublicBookingController {
   })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('professionals/:membershipId/book-with-deposit')
   async bookWithDeposit(
     @Param('slug') slug: string,
     @Param('membershipId') membershipId: string,
     @Body() dto: PublicBookWithDepositDto,
+    @CurrentAccount('sub') accountId?: string,
   ) {
     const membership = await this.resolveMembership(slug, membershipId);
     await this.assertBookable(membership.professionalId);
-    return this.appointments.bookWithDepositForMembership(membershipId, dto);
+    return this.appointments.bookWithDepositForMembership(membershipId, dto, accountId);
   }
 
   private async resolveMembership(slug: string, membershipId: string): Promise<Membership> {
@@ -424,12 +441,22 @@ export class PublicBookingController {
     deprecated: true,
   })
   @ApiResponse({ status: 201, type: Appointment })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('book')
-  async bookFlat(@Param('slug') slug: string, @Body() dto: PublicBookDto) {
+  async bookFlat(
+    @Param('slug') slug: string,
+    @Body() dto: PublicBookDto,
+    @CurrentAccount('sub') accountId?: string,
+  ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
     const membership = await this.singleMembershipOrThrow(comercio.id);
     await this.assertBookable(membership.professionalId);
-    return this.appointments.bookForMembership(membership.id, dto, CreatedVia.ClientSelf);
+    return this.appointments.bookForMembership(
+      membership.id,
+      dto,
+      CreatedVia.ClientSelf,
+      accountId,
+    );
   }
 
   @ApiOperation({
@@ -441,11 +468,16 @@ export class PublicBookingController {
     type: BookWithDepositResultDto,
     description: 'Ver ruta con membershipId. Con method=mercadopago appointment es null.',
   })
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('book-with-deposit')
-  async bookWithDepositFlat(@Param('slug') slug: string, @Body() dto: PublicBookWithDepositDto) {
+  async bookWithDepositFlat(
+    @Param('slug') slug: string,
+    @Body() dto: PublicBookWithDepositDto,
+    @CurrentAccount('sub') accountId?: string,
+  ) {
     const comercio = await this.comercios.getComercioBySlug(slug);
     const membership = await this.singleMembershipOrThrow(comercio.id);
     await this.assertBookable(membership.professionalId);
-    return this.appointments.bookWithDepositForMembership(membership.id, dto);
+    return this.appointments.bookWithDepositForMembership(membership.id, dto, accountId);
   }
 }

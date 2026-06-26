@@ -234,4 +234,75 @@ describe('Booking flow (e2e)', () => {
       expect(matches.length).toBe(1);
     });
   });
+
+  describe('Cliente logueado: el turno se ata a su cuenta y aparece en /me/appointments', () => {
+    let clientToken: string;
+    let bookedSlot: string;
+    const clientEmail = `cli-${Date.now()}@test.com`;
+
+    it('reserva con sesión: el turno se asocia a la cuenta (no al teléfono tipeado)', async () => {
+      const reg = await http
+        .post('/auth/register')
+        .send({ email: clientEmail, password: 'secret123', fullName: 'Cliente Logueado' })
+        .expect(201);
+      clientToken = reg.body.accessToken;
+      expect(clientToken).toBeDefined();
+
+      // Slot libre (día +3) para no chocar con los bloques anteriores.
+      const day = DateTime.now().plus({ days: 3 }).toISODate();
+      const slots = await http
+        .get(`/v1/availability/slots`)
+        .query({ staffId, serviceId, from: day, to: day })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      bookedSlot = slots.body[0].startAt;
+
+      // El front manda el bearer del cliente; el teléfono/nombre tipeados son
+      // datos de contacto del turno pero NO definen a qué cuenta pertenece.
+      await http
+        .post(`/r/${slug}/book`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({
+          staffId,
+          serviceId,
+          startAt: bookedSlot,
+          fullName: 'Otro Nombre',
+          phone: '2612999999',
+        })
+        .expect(201);
+    });
+
+    it('GET /v1/me/appointments devuelve el turno del cliente logueado', async () => {
+      const res = await http
+        .get('/v1/me/appointments')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+      const found = res.body.find((a: { startAt: string }) => a.startAt === bookedSlot);
+      expect(found).toBeDefined();
+      expect(found.status).toBe(AppointmentStatus.Confirmed);
+    });
+
+    it('una reserva sin sesión (invitado) sigue funcionando como antes', async () => {
+      const day = DateTime.now().plus({ days: 4 }).toISODate();
+      const slots = await http
+        .get(`/v1/availability/slots`)
+        .query({ staffId, serviceId, from: day, to: day })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+      const guestSlot = slots.body[0].startAt;
+
+      const guest = await http
+        .post(`/r/${slug}/book`)
+        .send({ staffId, serviceId, startAt: guestSlot, fullName: 'Invitado', phone: '2612888888' })
+        .expect(201);
+      expect(guest.body.status).toBe(AppointmentStatus.Confirmed);
+
+      // El invitado no quedó atado a la cuenta del cliente logueado.
+      const mine = await http
+        .get('/v1/me/appointments')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+      expect(mine.body.some((a: { startAt: string }) => a.startAt === guestSlot)).toBe(false);
+    });
+  });
 });

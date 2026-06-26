@@ -57,6 +57,40 @@ export class PersonsService {
     await this.persons.update({ id: personId }, { accountId });
   }
 
+  /**
+   * Person dueña de una cuenta autenticada (para atar un turno al cliente logueado).
+   * 1) Si la cuenta ya tiene Person, la devuelve.
+   * 2) Si no, intenta reclamar una identidad "suelta" (sin cuenta) que matchee por
+   *    email/phone y la vincula (caso típico: reservó como invitado antes de registrarse).
+   * 3) Si tampoco, crea una nueva ya vinculada.
+   * Nunca devuelve ni pisa la Person de OTRA cuenta.
+   */
+  async findOrCreateForAccount(
+    accountId: string,
+    data: { fullName: string; email?: string | null; phone?: string | null },
+  ): Promise<Person> {
+    const linked = await this.persons.findOne({ where: { accountId } });
+    if (linked) return linked;
+
+    const loose =
+      (data.email && (await this.persons.findOne({ where: { email: data.email } }))) ||
+      (data.phone && (await this.persons.findOne({ where: { phone: data.phone } }))) ||
+      null;
+    if (loose && !loose.accountId) {
+      loose.accountId = accountId;
+      return this.persons.save(loose);
+    }
+
+    return this.persons.save(
+      this.persons.create({
+        fullName: data.fullName,
+        email: data.email ?? null,
+        phone: data.phone ?? null,
+        accountId,
+      }),
+    );
+  }
+
   save(person: Person): Promise<Person> {
     return this.persons.save(person);
   }

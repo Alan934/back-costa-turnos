@@ -116,17 +116,24 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     return { professionalId: membership.professionalId, staffId: staff.id };
   }
 
-  /** Reserva pública (sin pago) en un comercio, eligiendo al profesional por membresía. */
+  /**
+   * Reserva pública (sin pago) en un comercio, eligiendo al profesional por membresía.
+   * Si `accountId` viene (cliente logueado), el turno se ata a la Person de su cuenta.
+   */
   async bookForMembership(
     membershipId: string,
     dto: { serviceId: string; startAt: string } & ClientRefDto,
     createdVia: CreatedVia,
+    accountId?: string | null,
   ): Promise<Appointment> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
-    return this.book(professionalId, { ...dto, staffId }, createdVia);
+    return this.book(professionalId, { ...dto, staffId }, createdVia, accountId);
   }
 
-  /** Reserva pública con seña/pago completo en un comercio, eligiendo al profesional. */
+  /**
+   * Reserva pública con seña/pago completo en un comercio, eligiendo al profesional.
+   * Si `accountId` viene (cliente logueado), el turno se ata a la Person de su cuenta.
+   */
   async bookWithDepositForMembership(
     membershipId: string,
     dto: {
@@ -136,9 +143,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       paymentOption?: PaymentOption;
       addonServiceIds?: string[];
     } & ClientRefDto,
+    accountId?: string | null,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
-    return this.bookWithDeposit(professionalId, { ...dto, staffId });
+    return this.bookWithDeposit(professionalId, { ...dto, staffId }, accountId);
   }
 
   // ---- Reservas "cualquiera" (servicio del comercio, el back elige profesional) ----
@@ -153,6 +161,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     serviceId: string,
     dto: { serviceId: string; startAt: string; addonServiceIds?: string[] } & ClientRefDto,
     createdVia: CreatedVia,
+    accountId?: string | null,
   ): Promise<Appointment> {
     const candidates = await this.rankCandidates(
       comercioId,
@@ -164,7 +173,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     let lastError: unknown;
     for (const membership of candidates) {
       try {
-        const appointment = await this.bookForMembership(membership.id, bookDto, createdVia);
+        const appointment = await this.bookForMembership(
+          membership.id,
+          bookDto,
+          createdVia,
+          accountId,
+        );
         appointment.professionalDisplayName = membership.professional?.businessName;
         return appointment;
       } catch (err) {
@@ -191,6 +205,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       paymentOption?: PaymentOption;
       addonServiceIds?: string[];
     } & ClientRefDto,
+    accountId?: string | null,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const candidates = await this.rankCandidates(
       comercioId,
@@ -202,7 +217,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     let lastError: unknown;
     for (const membership of candidates) {
       try {
-        const result = await this.bookWithDepositForMembership(membership.id, bookDto);
+        const result = await this.bookWithDepositForMembership(membership.id, bookDto, accountId);
         if (result.appointment) {
           result.appointment.professionalDisplayName = membership.professional?.businessName;
         }
@@ -324,7 +339,18 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }
   }
 
-  private async resolvePersonId(ref: ClientRefDto): Promise<string> {
+  private async resolvePersonId(ref: ClientRefDto, accountId?: string | null): Promise<string> {
+    // Cliente logueado: el turno es de la Person de su cuenta, sin importar el
+    // teléfono/email tipeados (que igual quedan como datos de contacto del DTO).
+    // Así el turno aparece en su dashboard (/me/appointments lo busca por accountId).
+    if (accountId) {
+      const person = await this.persons.findOrCreateForAccount(accountId, {
+        fullName: ref.fullName ?? 'Cliente',
+        email: ref.email ?? null,
+        phone: ref.phone ?? null,
+      });
+      return person.id;
+    }
     if (ref.personId) {
       const person = await this.persons.findById(ref.personId);
       if (!person) throw new NotFoundException('Persona no encontrada');
@@ -422,6 +448,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     tenantId: string,
     dto: BookAppointmentDto,
     createdVia: CreatedVia,
+    accountId?: string | null,
   ): Promise<Appointment> {
     const service = await this.loadService(dto.serviceId);
     if (!service.allowNoPayment) {
@@ -446,7 +473,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     this.assertLeadTime(startAt, membership.minBookingHours);
     this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
-    const personId = await this.resolvePersonId(dto);
+    const personId = await this.resolvePersonId(dto, accountId);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
     const holds = await this.pendingHolds(this.pendingBookings, tenantId, startAt, endAt);
@@ -510,6 +537,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   async bookWithDeposit(
     tenantId: string,
     dto: BookWithDepositDto,
+    accountId?: string | null,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const service = await this.loadService(dto.serviceId);
     const option = dto.paymentOption ?? PaymentOption.Deposit;
@@ -596,7 +624,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
     this.assertLeadTime(startAt, membership.minBookingHours);
     this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
-    const personId = await this.resolvePersonId(dto);
+    const personId = await this.resolvePersonId(dto, accountId);
 
     const { appointment, payment } = await this.tenantContext.runWithTenant(
       tenantId,
