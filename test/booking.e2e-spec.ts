@@ -305,4 +305,114 @@ describe('Booking flow (e2e)', () => {
       expect(mine.body.some((a: { startAt: string }) => a.startAt === guestSlot)).toBe(false);
     });
   });
+
+  describe('Bug #2: turnos en MÚLTIPLES comercios se unen en /me/appointments', () => {
+    let clientToken: string;
+    let slugB: string;
+    let serviceB: string;
+    let slotA: string;
+    let slotB: string;
+    const clientEmail = `multi-${Date.now()}@test.com`;
+    const password = 'secret123';
+
+    it('prepara un segundo comercio (Profesional B) con servicio y horarios', async () => {
+      slugB = `prob-${Date.now()}`;
+      const reg = await http
+        .post('/auth/register-professional')
+        .send({
+          email: `prob-${Date.now()}@test.com`,
+          password,
+          fullName: 'Pro B',
+          businessName: 'Shop B',
+          slug: slugB,
+        })
+        .expect(201);
+      const tokenB = reg.body.accessToken;
+
+      const staffRes = await http
+        .get('/v1/professionals/staff')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+      const staffB = staffRes.body[0].id;
+
+      const svc = await http
+        .post('/v1/services')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ name: 'Corte B', durationMinutes: 30, priceCents: 300000, allowNoPayment: true })
+        .expect(201);
+      serviceB = svc.body.id;
+
+      for (let d = 0; d <= 6; d++) {
+        await http
+          .post(`/v1/availability/staff/${staffB}/schedule`)
+          .set('Authorization', `Bearer ${tokenB}`)
+          .send({ dayOfWeek: d, startTime: '09:00', endTime: '18:00' })
+          .expect(201);
+      }
+    });
+
+    it('el mismo cliente, logueado, reserva en comercio A y en comercio B', async () => {
+      const reg = await http
+        .post('/auth/register')
+        .send({ email: clientEmail, password, fullName: 'Cliente Multi' })
+        .expect(201);
+      clientToken = reg.body.accessToken;
+
+      const day = DateTime.now().plus({ days: 5 }).toISODate();
+
+      // Slots por las páginas públicas (no dependen del tenant logueado).
+      const slotsA = await http
+        .get(`/r/${slug}/slots`)
+        .query({ serviceId, from: day, to: day })
+        .expect(200);
+      slotA = slotsA.body[0].startAt;
+      await http
+        .post(`/r/${slug}/book`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ serviceId, startAt: slotA, fullName: 'Cliente Multi', phone: '2612111111' })
+        .expect(201);
+
+      const slotsB = await http
+        .get(`/r/${slugB}/slots`)
+        .query({ serviceId: serviceB, from: day, to: day })
+        .expect(200);
+      slotB = slotsB.body[0].startAt;
+      await http
+        .post(`/r/${slugB}/book`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({
+          serviceId: serviceB,
+          startAt: slotB,
+          fullName: 'Cliente Multi',
+          phone: '2612111111',
+        })
+        .expect(201);
+    });
+
+    it('GET /v1/me/appointments devuelve AMBOS turnos (unión de comercios)', async () => {
+      const res = await http
+        .get('/v1/me/appointments')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+      const starts = res.body.map((a: { startAt: string }) => a.startAt);
+      expect(starts).toContain(slotA);
+      expect(starts).toContain(slotB);
+    });
+
+    it('tras logout/login, ambos turnos siguen apareciendo', async () => {
+      const login = await http
+        .post('/auth/login')
+        .send({ email: clientEmail, password })
+        .expect(200);
+      const token2 = login.body.accessToken;
+
+      const res = await http
+        .get('/v1/me/appointments')
+        .set('Authorization', `Bearer ${token2}`)
+        .expect(200);
+      const starts = res.body.map((a: { startAt: string }) => a.startAt);
+      expect(starts).toContain(slotA);
+      expect(starts).toContain(slotB);
+    });
+  });
 });

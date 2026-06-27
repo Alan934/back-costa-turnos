@@ -69,7 +69,14 @@ export class PersonsService {
     accountId: string,
     data: { fullName: string; email?: string | null; phone?: string | null },
   ): Promise<Person> {
-    const linked = await this.persons.findOne({ where: { accountId } });
+    // Determinístico: si la cuenta tiene varias identidades (datos legados), siempre
+    // se reusa la MÁS ANTIGUA como canónica. Así dos reservas de la misma cuenta
+    // nunca cambian a qué identidad pertenecen los turnos. (id es uuid v7, ordenable
+    // por tiempo de creación.)
+    const linked = await this.persons.findOne({
+      where: { accountId },
+      order: { id: 'ASC' },
+    });
     if (linked) return linked;
 
     const loose =

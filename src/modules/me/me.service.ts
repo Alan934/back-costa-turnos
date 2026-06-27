@@ -47,13 +47,28 @@ export class MeService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  /**
+   * Ids de TODAS las `Person` vinculadas a la cuenta. Normalmente es una sola
+   * (identidad global por cuenta), pero el vínculo account↔person no tiene un
+   * único garantizado a nivel DB: datos legados o el reclamo de identidades
+   * sueltas por email/phone pueden dejar más de una. Unir por todas evita que los
+   * turnos de un comercio "desaparezcan" si la cuenta quedó con varias identidades.
+   */
+  private async accountPersonIds(accountId: string): Promise<string[]> {
+    const persons = await this.persons.find({
+      where: { accountId },
+      select: { id: true },
+    });
+    return persons.map((p) => p.id);
+  }
+
   /** Todos los turnos del cliente autenticado, en todos los negocios (cross-tenant). */
   async listMyAppointments(accountId: string): Promise<MyAppointmentDto[]> {
-    const person = await this.persons.findOne({ where: { accountId } });
-    if (!person) return [];
+    const personIds = await this.accountPersonIds(accountId);
+    if (personIds.length === 0) return [];
 
     const appts = await this.appointments.find({
-      where: { personId: person.id },
+      where: { personId: In(personIds) },
       order: { startAt: 'ASC' },
     });
     if (appts.length === 0) return [];
@@ -64,11 +79,11 @@ export class MeService {
 
   /** Cancela un turno propio si esta dentro de la ventana de cancelacion. */
   async cancelMyAppointment(accountId: string, appointmentId: string): Promise<MyAppointmentDto> {
-    const person = await this.persons.findOne({ where: { accountId } });
-    if (!person) throw new NotFoundException('Cliente no encontrado');
+    const personIds = await this.accountPersonIds(accountId);
+    if (personIds.length === 0) throw new NotFoundException('Cliente no encontrado');
 
     const appt = await this.appointments.findOne({
-      where: { id: appointmentId, personId: person.id },
+      where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
     if (TERMINAL.includes(appt.status)) {
@@ -98,11 +113,11 @@ export class MeService {
     appointmentId: string,
     dto: RescheduleMyAppointmentDto,
   ): Promise<MyAppointmentDto> {
-    const person = await this.persons.findOne({ where: { accountId } });
-    if (!person) throw new NotFoundException('Cliente no encontrado');
+    const personIds = await this.accountPersonIds(accountId);
+    if (personIds.length === 0) throw new NotFoundException('Cliente no encontrado');
 
     const appt = await this.appointments.findOne({
-      where: { id: appointmentId, personId: person.id },
+      where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
     if (TERMINAL.includes(appt.status)) {
@@ -165,13 +180,14 @@ export class MeService {
     await this.appointments.save(appt);
 
     // Avisa al profesional por correo que el cliente movió el turno.
+    const owner = await this.persons.findOne({ where: { id: appt.personId } });
     await this.notifications.enqueue({
       professionalId: appt.professionalId,
       channel: NotificationChannel.Email,
       type: NotificationType.Rescheduled,
       payload: {
         appointmentId: appt.id,
-        clientName: person.fullName,
+        clientName: owner?.fullName ?? '',
         oldStartAt,
         newStartAt: appt.startAt.toISOString(),
       },
