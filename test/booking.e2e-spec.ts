@@ -282,6 +282,23 @@ describe('Booking flow (e2e)', () => {
       expect(found.status).toBe(AppointmentStatus.Confirmed);
     });
 
+    it('business expone phone/email de contacto del negocio cuando el pro los cargó', async () => {
+      // El profesional carga su contacto público (mismo origen que la página pública).
+      await http
+        .patch('/v1/professionals/me')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ publicPageSettings: { phone: '2613334444', email: 'contacto@shop.test' } })
+        .expect(200);
+
+      const res = await http
+        .get('/v1/me/appointments')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .expect(200);
+      const found = res.body.find((a: { startAt: string }) => a.startAt === bookedSlot);
+      expect(found.business.phone).toBe('2613334444');
+      expect(found.business.email).toBe('contacto@shop.test');
+    });
+
     it('una reserva sin sesión (invitado) sigue funcionando como antes', async () => {
       const day = DateTime.now().plus({ days: 4 }).toISODate();
       const slots = await http

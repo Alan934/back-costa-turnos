@@ -10,7 +10,10 @@ export interface PublicPageSettings {
   primaryColor?: string;
   description?: string;
   bio?: string;
+  /** Teléfono/WhatsApp de contacto del negocio (lo expone la página pública y "mis turnos"). */
   phone?: string;
+  /** Email de contacto del negocio (opcional; lo expone "mis turnos" para el botón de mail). */
+  email?: string;
   [key: string]: unknown;
 }
 

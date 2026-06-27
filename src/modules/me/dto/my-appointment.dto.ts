@@ -19,6 +19,12 @@ export class MyAppointmentBusinessDto {
   cancellationWindowHours!: number;
   @ApiProperty({ type: Number })
   rescheduleWindowHours!: number;
+  /** WhatsApp/teléfono de contacto del negocio (publicPageSettings.phone). null si no lo cargó. */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  phone!: string | null;
+  /** Email de contacto del negocio (publicPageSettings.email). null si no lo cargó. */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  email!: string | null;
 }
 
 export class MyAppointmentDto {

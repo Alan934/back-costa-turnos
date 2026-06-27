@@ -249,6 +249,10 @@ export class MeService {
         address: professional?.address ?? null,
         cancellationWindowHours: professional?.cancellationWindowHours ?? 0,
         rescheduleWindowHours: professional?.rescheduleWindowHours ?? 0,
+        // Mismo origen que la página pública (publicPageSettings). Crudo: el front
+        // normaliza dígitos para wa.me. null si el profesional no lo cargó.
+        phone: professional?.publicPageSettings?.phone ?? null,
+        email: professional?.publicPageSettings?.email ?? null,
       },
     };
   }
