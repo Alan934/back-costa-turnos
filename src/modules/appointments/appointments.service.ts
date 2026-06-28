@@ -378,6 +378,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     personId: string,
     manager?: EntityManager,
   ): Promise<void> {
+    // No vincular al dueño como cliente de sí mismo: si la persona resuelta pertenece
+    // a la cuenta del propio profesional (reserva con su mismo email/teléfono, o estando
+    // logueado), no se crea la membresía. Evita que figure en su propia cartera.
+    if (await this.isOwnerPerson(professionalId, personId, manager)) return;
+
     const repo = manager ? manager.getRepository(ProfessionalClient) : this.professionalClients;
     // El QueryBuilder NO dispara el hook @BeforeInsert de BaseEntity, asi que la PK
     // (uuid v7 generada en la app) hay que setearla explicitamente o queda NULL.
@@ -388,6 +393,23 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       .values({ id: uuidv7(), professionalId, personId, status: ProfessionalClientStatus.Active })
       .orIgnore() // respeta uq_professional_client(professional_id, person_id)
       .execute();
+  }
+
+  /**
+   * true si `personId` es una identidad de la cuenta dueña del tenant. La detección
+   * es por accountId (no por email), así también atrapa el caso borde de la persona
+   * sin email vinculada solo por teléfono.
+   */
+  private async isOwnerPerson(
+    professionalId: string,
+    personId: string,
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    const profRepo = manager ? manager.getRepository(Professional) : this.professionals;
+    const professional = await profRepo.findOne({ where: { id: professionalId } });
+    if (!professional?.accountId) return false;
+    const person = await this.persons.findById(personId);
+    return person?.accountId != null && person.accountId === professional.accountId;
   }
 
   private async loadService(serviceId: string): Promise<Service> {

@@ -188,6 +188,12 @@ export class AuthMeDto {
   @ApiPropertyOptional({ format: 'uuid', description: 'professional (trabajador)' })
   professionalId?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'persona (identidad de cliente) de la cuenta; null si aún no tiene',
+  })
+  personId?: string;
+
   @ApiPropertyOptional({ format: 'uuid' })
   staffId?: string;
 

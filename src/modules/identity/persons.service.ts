@@ -21,8 +21,9 @@ export class PersonsService {
     return this.persons.findOne({ where: { id } });
   }
 
+  /** Person canónica de una cuenta (la más antigua; id uuid v7 es ordenable por tiempo). */
   findByAccountId(accountId: string): Promise<Person | null> {
-    return this.persons.findOne({ where: { accountId } });
+    return this.persons.findOne({ where: { accountId }, order: { id: 'ASC' } });
   }
 
   /** Lookup en lote de personas por id (para embeber nombres en listados). */

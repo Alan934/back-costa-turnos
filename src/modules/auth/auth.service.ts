@@ -20,6 +20,7 @@ import { MailerService } from '@/modules/mailer/mailer.service';
 import { TokensService, IssuedTokens } from './tokens.service';
 import { VerificationTokenService } from './verification-token.service';
 import {
+  AuthMeDto,
   ClaimAccountDto,
   LoginDto,
   RegisterComercialDto,
@@ -103,10 +104,15 @@ export class AuthService {
 
   /** Datos frescos del usuario autenticado (para GET /auth/me): recarga la cuenta
    *  para reflejar emailVerified al instante (no el valor del token, que puede ser viejo). */
-  async getMe(accountId: string): Promise<JwtPayload> {
+  async getMe(accountId: string): Promise<AuthMeDto> {
     const account = await this.accounts.findById(accountId);
     if (!account) throw new UnauthorizedException('Cuenta no encontrada');
-    return this.buildPayload(account);
+    const payload = await this.buildPayload(account);
+    // personId: identidad de cliente de la cuenta (no se firma en el token; solo
+    // lo expone /auth/me). Permite al front filtrar de forma fiable al dueño de su
+    // propia cartera sin depender del email.
+    const person = await this.persons.findByAccountId(accountId);
+    return { ...payload, personId: person?.id };
   }
 
   private async issueAndPersist(account: Account): Promise<IssuedTokens> {

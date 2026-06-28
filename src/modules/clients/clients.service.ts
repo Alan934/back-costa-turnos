@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { AppointmentStatus, ProfessionalClientStatus } from '@/common/enums';
 import { PersonsService } from '@/modules/identity/persons.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { ProfessionalClient } from './entities/professional-client.entity';
 import { FichaField } from './entities/ficha-field.entity';
 import { ClientNote } from './entities/client-note.entity';
@@ -32,6 +33,8 @@ export class ClientsService {
     private readonly notes: Repository<ClientNote>,
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
+    @InjectRepository(Professional)
+    private readonly professionals: Repository<Professional>,
     private readonly persons: PersonsService,
   ) {}
 
@@ -98,15 +101,24 @@ export class ClientsService {
       order: { createdAt: 'DESC' },
     });
 
+    // El dueño nunca es cliente de sí mismo: excluir las membresías cuya persona
+    // pertenezca a la cuenta del propio profesional (identidad cuenta↔Person es 1:N,
+    // por eso filtramos por accountId y no por una sola persona "canónica").
+    const professional = await this.professionals.findOne({ where: { id: tenantId } });
+    const ownerAccountId = professional?.accountId ?? null;
+    const ownPortfolio = ownerAccountId
+      ? all.filter((c) => c.person?.accountId !== ownerAccountId)
+      : all;
+
     const term = q?.trim().toLowerCase();
     const filtered = term
-      ? all.filter((c) => {
+      ? ownPortfolio.filter((c) => {
           const p = c.person;
           return [p?.fullName, p?.email, p?.phone]
             .filter(Boolean)
             .some((v) => v!.toLowerCase().includes(term));
         })
-      : all;
+      : ownPortfolio;
 
     const visits = await this.computeVisits(
       tenantId,
