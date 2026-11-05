@@ -1,7 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
-import { ScheduleRuleKind } from '@/common/enums';
+import { AttendanceMode, ScheduleRuleKind } from '@/common/enums';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 
@@ -52,6 +52,22 @@ export class ScheduleRule extends BaseEntity {
     default: ScheduleRuleKind.Work,
   })
   kind!: ScheduleRuleKind;
+
+  /**
+   * Solo para franjas de trabajo. `walk_in` = esa franja se atiende por orden de llegada
+   * (sin turnos: no genera horarios reservables; el cliente se anota en la sala de espera).
+   * Se ignora en los descansos. Si la membresía atiende siempre por orden de llegada
+   * (`membership.walk_in_only`), todas sus franjas de trabajo se tratan como `walk_in`.
+   */
+  @ApiProperty({ enum: AttendanceMode, enumName: 'AttendanceMode' })
+  @Column({
+    name: 'attendance_mode',
+    type: 'enum',
+    enum: AttendanceMode,
+    enumName: 'attendance_mode',
+    default: AttendanceMode.Appointment,
+  })
+  attendanceMode!: AttendanceMode;
 
   /**
    * Servicios a los que aplica esta regla (mapeo schedule_rule_service). NO se

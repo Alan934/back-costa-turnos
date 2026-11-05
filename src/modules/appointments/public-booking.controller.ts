@@ -63,9 +63,15 @@ export class PublicBookingController {
     return membership.address ?? comercio.address;
   }
 
-  private toPublicProfessional(membership: Membership, comercio: Comercio): PublicProfessionalDto {
+  private async toPublicProfessional(
+    membership: Membership,
+    comercio: Comercio,
+  ): Promise<PublicProfessionalDto> {
     const settings = membership.professional?.publicPageSettings ?? {};
+    const attendance = await this.availability.getWalkInSchedule(membership);
     return {
+      walkInOnly: attendance.walkInOnly,
+      walkInSchedule: attendance.windows,
       membershipId: membership.id,
       professionalId: membership.professionalId,
       displayName: membership.professional?.businessName ?? 'Profesional',
@@ -115,7 +121,7 @@ export class PublicBookingController {
       address: comercio.address,
       isPersonal: comercio.isPersonal,
       settings: comercio.publicPageSettings,
-      professionals: members.map((m) => this.toPublicProfessional(m, comercio)),
+      professionals: await Promise.all(members.map((m) => this.toPublicProfessional(m, comercio))),
     };
   }
 
@@ -277,7 +283,7 @@ export class PublicBookingController {
     );
     const services = await this.catalog.listActiveByMembership(membership.id);
     return {
-      ...this.toPublicProfessional(membership, comercio),
+      ...(await this.toPublicProfessional(membership, comercio)),
       timezone: comercio.timezone,
       services,
     };

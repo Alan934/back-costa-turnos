@@ -308,6 +308,7 @@ export class ComerciosService {
       minBookingHours?: number;
       maxBookingDays?: number;
       allowProvisionalBookings?: boolean;
+      walkInOnly?: boolean;
       waitingRoomEnabled?: boolean;
       waitingRoomSelfCheckIn?: boolean;
       waitingRoomStatus?: WaitingRoomStatus;
@@ -327,6 +328,9 @@ export class ComerciosService {
     }
     if (dto.allowProvisionalBookings !== undefined) {
       membership.allowProvisionalBookings = dto.allowProvisionalBookings;
+    }
+    if (dto.walkInOnly !== undefined) {
+      membership.walkInOnly = dto.walkInOnly;
     }
     if (dto.waitingRoomEnabled !== undefined) {
       membership.waitingRoomEnabled = dto.waitingRoomEnabled;

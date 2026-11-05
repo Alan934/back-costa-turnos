@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AppointmentStatus, WaitingRoomStatus } from '@/common/enums';
+import { WalkInStatusDto } from '@/modules/availability/dto/availability.dto';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
@@ -106,6 +107,21 @@ export class WaitingRoomDto {
 
   @ApiProperty({ type: Boolean, description: 'El cliente puede anotarse solo escaneando el QR.' })
   selfCheckInEnabled!: boolean;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Se puede anotar AHORA: self check-in habilitado, sala no cerrada y, si el profesional ' +
+      'define franjas por orden de llegada, dentro de una de ellas. Es lo que decide si se ' +
+      'muestra el botón "Anotarme".',
+  })
+  selfCheckInOpen!: boolean;
+
+  @ApiProperty({
+    type: WalkInStatusDto,
+    description: 'Cuándo atiende por orden de llegada (franjas de hoy, próxima franja, etc.).',
+  })
+  attendance!: WalkInStatusDto;
 
   @ApiPropertyOptional({ type: WaitingItemDto, nullable: true })
   nowServing!: WaitingItemDto | null;

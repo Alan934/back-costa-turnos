@@ -106,6 +106,17 @@ export class UpdateMembershipDto {
 
   @ApiPropertyOptional({
     type: Boolean,
+    example: false,
+    description:
+      'Atiende SIEMPRE por orden de llegada: no ofrece turnos con horario. Reversible: al apagarlo, ' +
+      'cada franja de trabajo vuelve a su modo (con turno / por orden de llegada).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  walkInOnly?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
     example: true,
     description:
       'Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del QR del local).',

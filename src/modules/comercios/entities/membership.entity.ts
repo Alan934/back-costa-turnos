@@ -77,6 +77,15 @@ export class Membership extends BaseEntity {
   @Column({ name: 'allow_provisional_bookings', type: 'boolean', default: false })
   allowProvisionalBookings!: boolean;
 
+  /**
+   * Atiende SIEMPRE por orden de llegada: no ofrece turnos con horario, todas sus franjas de
+   * trabajo son por orden de llegada. Es un interruptor reversible: al apagarlo, cada franja
+   * vuelve al modo que tenía configurado.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'walk_in_only', type: 'boolean', default: false })
+  walkInOnly!: boolean;
+
   // ---- Sala de espera (pantalla publica + walk-ins) ----
   /**
    * Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del

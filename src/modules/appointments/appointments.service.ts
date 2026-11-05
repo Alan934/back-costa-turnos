@@ -57,6 +57,7 @@ import {
   WaitingRoomStatsDto,
   LeaveResultDto,
 } from './dto/waiting-room.dto';
+import { WalkInStatusDto, WalkInWindowDto } from '@/modules/availability/dto/availability.dto';
 import { WaitingRoomGateway } from './waiting-room.gateway';
 import { WaitingRoomNotifier } from './waiting-room.notifier';
 import { PushService, BrowserSubscription } from '@/modules/push/push.service';
@@ -84,6 +85,24 @@ const OFF_SYSTEM_METHODS = [PaymentMethod.Cash, PaymentMethod.Transfer];
 
 /** Minutos que un horario queda reservado (hold) mientras se paga con MercadoPago. */
 const HOLD_TTL_MINUTES = 15;
+
+/** Sin membresía resuelta no hay franjas: la sala funciona como siempre. */
+const EMPTY_ATTENDANCE: WalkInStatusDto = {
+  walkInOnly: false,
+  hasSchedule: false,
+  openNow: true,
+  todayWindows: [],
+  nextWindow: null,
+  windows: [],
+};
+
+const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+/** " Próxima franja: el sábado de 09:00 a 13:00." (o vacío si no hay ninguna). */
+function describeNextWindow(next: WalkInWindowDto | null): string {
+  if (!next) return '';
+  return ` Próxima franja: el ${DAY_NAMES[next.dayOfWeek]} de ${next.startTime} a ${next.endTime}.`;
+}
 
 /**
  * Orden de la cola de la sala: primero los marcados como prioritarios; dentro de cada
@@ -140,6 +159,24 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   }
 
   /**
+   * Rechaza una reserva con horario dentro de una franja por orden de llegada. La pantalla ya no
+   * ofrece esos horarios, pero la API es pública: sin esta guarda alguien podría reservar un
+   * turno en un tramo donde el profesional atiende solo por llegada.
+   */
+  private async assertNotWalkInSlot(
+    membershipId: string,
+    serviceId: string,
+    startAt: string,
+  ): Promise<void> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    if (await this.availability.isWalkInAt(membership, serviceId, new Date(startAt))) {
+      throw new BadRequestException(
+        'En ese horario se atiende por orden de llegada: no se reservan turnos. Anotate en la sala de espera del local.',
+      );
+    }
+  }
+
+  /**
    * Resuelve professionalId + staffId a partir de una membresía (para reservas
    * públicas en un comercio, donde el cliente elige al profesional, no el staff).
    */
@@ -165,6 +202,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     accountId?: string | null,
   ): Promise<Appointment> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    // Lo que reserva el propio cliente respeta las franjas por orden de llegada; el profesional
+    // puede cargar un turno a mano donde quiera.
+    if (createdVia === CreatedVia.ClientSelf) {
+      await this.assertNotWalkInSlot(membershipId, dto.serviceId, dto.startAt);
+    }
     return this.book(professionalId, { ...dto, staffId }, createdVia, accountId);
   }
 
@@ -184,6 +226,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     accountId?: string | null,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    await this.assertNotWalkInSlot(membershipId, dto.serviceId, dto.startAt);
     return this.bookWithDeposit(professionalId, { ...dto, staffId }, accountId);
   }
 
@@ -1220,6 +1263,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const duration = (a: Appointment) =>
       learned.get(a.serviceId) ?? serviceById.get(a.serviceId)?.durationMinutes ?? 30;
 
+    const attendance = membership
+      ? await this.availability.getWalkInSchedule(membership)
+      : EMPTY_ATTENDANCE;
+
     const now = Date.now();
     // El cursor arranca en "ahora" y avanza con la duración de cada uno. Si hay
     // alguien en atención, el primero de la cola no puede empezar antes de que
@@ -1274,6 +1321,13 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       status: membership?.waitingRoomStatus ?? WaitingRoomStatus.Open,
       note: membership?.waitingRoomNote ?? null,
       selfCheckInEnabled: membership?.waitingRoomSelfCheckIn ?? false,
+      selfCheckInOpen:
+        !!membership?.waitingRoomEnabled &&
+        !!membership.waitingRoomSelfCheckIn &&
+        membership.waitingRoomStatus !== WaitingRoomStatus.Closed &&
+        // Si el profesional definió franjas por orden de llegada, solo se anota dentro de ellas.
+        (!attendance.hasSchedule || attendance.openNow),
+      attendance,
       nowServing: inProgress ? toItem(inProgress, 0, 0) : null,
       queue,
       pending: appts
@@ -1492,6 +1546,14 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }
     if (membership.waitingRoomStatus === WaitingRoomStatus.Closed) {
       throw new ForbiddenException('La sala de espera está cerrada en este momento.');
+    }
+    // Si el profesional define franjas por orden de llegada, solo se puede anotar dentro de ellas
+    // (fuera de esas horas se atiende con turno). Sin franjas definidas no hay restricción.
+    const attendance = await this.availability.getWalkInSchedule(membership, input.serviceId);
+    if (attendance.hasSchedule && !attendance.openNow) {
+      throw new ForbiddenException(
+        `Ahora no se atiende por orden de llegada.${describeNextWindow(attendance.nextWindow)}`,
+      );
     }
     const staff = await this.staff.findOne({
       where: { professionalId: membership.professionalId },

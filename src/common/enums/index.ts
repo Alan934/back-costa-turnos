@@ -68,6 +68,15 @@ export enum ScheduleRuleKind {
   Break = 'break',
 }
 
+/**
+ * Cómo se atiende en una franja de trabajo: con turno (se reserva un horario) o por orden
+ * de llegada (sin horario: la gente se anota en la sala de espera y se atiende en orden).
+ */
+export enum AttendanceMode {
+  Appointment = 'appointment',
+  WalkIn = 'walk_in',
+}
+
 /** Tipo de ausencia de un `time_off` (feriado / vacaciones / bloqueo manual). */
 export enum TimeOffType {
   Holiday = 'holiday',
