@@ -16,6 +16,13 @@ import {
   CancelAppointmentDto,
   CompleteAppointmentDto,
 } from './dto/appointment.dto';
+import {
+  CreateWalkInDto,
+  MoveInQueueDto,
+  SetPriorityDto,
+  WaitingRoomDto,
+  WaitingRoomStatsDto,
+} from './dto/waiting-room.dto';
 
 @ApiTags('appointments')
 @ApiBearerAuth()
@@ -64,18 +71,137 @@ export class AppointmentsController {
     return this.appointments.bookWithDeposit(tenantId, dto);
   }
 
-  @ApiOperation({ summary: 'Obtener la sala de espera de un staff' })
-  @ApiResponse({
-    status: 200,
+  @ApiOperation({
+    summary: 'Obtener la sala de espera de un staff',
     description:
-      'Estructura computada { staffId, generatedAt, queue[] } con los ETA estimados de la cola.',
+      'La cola son solo los presentes (con check-in de llegada), en orden de atención, con ' +
+      'posición y ETA. `pending` son los self check-in esperando aprobación del profesional.',
   })
+  @ApiQuery({
+    name: 'membershipId',
+    required: false,
+    description: 'Comercio donde está atendiendo. Por defecto, su comercio propio.',
+  })
+  @ApiResponse({ status: 200, type: WaitingRoomDto })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Get('waiting-room/:staffId')
-  waitingRoom(@CurrentTenant() tenantId: string, @Param('staffId') staffId: string) {
-    return this.appointments.computeWaitingRoom(tenantId, staffId);
+  waitingRoom(
+    @CurrentTenant() tenantId: string,
+    @Param('staffId') staffId: string,
+    @Query('membershipId') membershipId?: string,
+  ) {
+    return this.appointments.computeWaitingRoom(tenantId, staffId, membershipId);
+  }
+
+  @ApiOperation({
+    summary: 'Estadísticas de la sala de los últimos N días',
+    description:
+      'Espera promedio/máxima, duración real de las atenciones, horas pico de llegada y ' +
+      'servicios más pedidos. Las horas van en la zona horaria del profesional.',
+  })
+  @ApiQuery({ name: 'days', required: false, description: 'Ventana en días (1-365). Default 30.' })
+  @ApiResponse({ status: 200, type: WaitingRoomStatsDto })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @Get('waiting-room/:staffId/stats')
+  waitingRoomStats(
+    @CurrentTenant() tenantId: string,
+    @Param('staffId') staffId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.appointments.getWaitingRoomStats(tenantId, staffId, days ? Number(days) || 30 : 30);
+  }
+
+  @ApiOperation({
+    summary: 'Agregar a la cola un cliente que llegó sin turno',
+    description:
+      'Crea el turno en el momento (createdVia=walk_in, startAt=ahora) ya presente en la sala. ' +
+      'Aceptá un personId de la cartera o fullName (+ teléfono) para dar de alta a alguien nuevo.',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post('walk-in')
+  walkIn(@CurrentTenant() tenantId: string, @Body() dto: CreateWalkInDto) {
+    return this.appointments.createWalkInForTenant(tenantId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Marcar que el cliente llegó (entra a la sala de espera)',
+    description: 'Le asigna número de turno del día. Idempotente: no cambia el número si ya llegó.',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'El turno ya está cerrado' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/check-in')
+  checkIn(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.appointments.checkIn(tenantId, id);
+  }
+
+  @ApiOperation({
+    summary: 'Llamar a alguien de la fila ("pasá, te toca")',
+    description:
+      'Le llega un push con vibración y su pantalla pasa a "¡Es tu turno!". Se puede repetir ' +
+      'si no responde.',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'No está en la fila' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/call')
+  call(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.appointments.call(tenantId, id);
+  }
+
+  @ApiOperation({
+    summary: 'Mandar al final de la fila (no respondió)',
+    description: 'Alternativa a marcarlo como que no vino. Conserva su número de turno.',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'No está en la fila' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/send-to-back')
+  sendToBack(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.appointments.sendToBack(tenantId, id);
+  }
+
+  @ApiOperation({ summary: 'Subir o bajar un lugar en la fila' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'No está en la fila / cruza grupo de prioridad' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/move')
+  move(@CurrentTenant() tenantId: string, @Param('id') id: string, @Body() dto: MoveInQueueDto) {
+    return this.appointments.moveInQueue(tenantId, id, dto.direction);
+  }
+
+  @ApiOperation({ summary: 'Marcar/desmarcar como urgente (pasa al frente de la fila)' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'No está en la fila' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/priority')
+  priority(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: SetPriorityDto,
+  ) {
+    return this.appointments.setPriority(tenantId, id, dto.priority);
+  }
+
+  @ApiOperation({
+    summary: 'Deshacer el check-in (sale de la cola, el turno se conserva)',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/undo-check-in')
+  undoCheckIn(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.appointments.undoCheckIn(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Obtener un turno por id' })

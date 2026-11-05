@@ -8,18 +8,12 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { WaitingRoomDto } from './dto/waiting-room.dto';
 
-export interface QueueEtaItem {
-  appointmentId: string;
-  personId: string;
-  status: string;
-  estimatedStartAt: string;
-}
-
-export interface QueueUpdatePayload {
+/** Snapshot completo de la sala: el cliente pinta lo que llega, sin recalcular nada. */
+export interface RoomUpdatePayload {
   staffId: string;
-  generatedAt: string;
-  queue: QueueEtaItem[];
+  room: WaitingRoomDto;
 }
 
 function room(staffId: string): string {
@@ -27,9 +21,13 @@ function room(staffId: string): string {
 }
 
 /**
- * Sala de espera en vivo. Los clientes se unen a la sala de un staff y reciben
- * el recalculo del ETA cada vez que la cola avanza. Usa el adapter Redis
- * (configurado en main.ts) para funcionar con multiples instancias.
+ * Sala de espera en vivo. Los clientes (la pantalla del local, el celular de
+ * cada persona en la fila y el panel del profesional) se unen a la sala de un
+ * staff y reciben el snapshot completo cada vez que la cola cambia. Usa el
+ * adapter Redis (configurado en main.ts) para funcionar con varias instancias.
+ *
+ * Los nombres de evento y el namespace son parte del contrato con el front
+ * (ver `src/lib/realtime/events.ts`): `waiting-room:join` / `waiting-room:update`.
  */
 @WebSocketGateway({ namespace: '/waiting-room', cors: { origin: '*' } })
 export class WaitingRoomGateway implements OnGatewayConnection {
@@ -42,7 +40,7 @@ export class WaitingRoomGateway implements OnGatewayConnection {
     this.logger.debug(`Cliente conectado a sala de espera: ${client.id}`);
   }
 
-  @SubscribeMessage('join')
+  @SubscribeMessage('waiting-room:join')
   onJoin(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { staffId: string },
@@ -51,7 +49,7 @@ export class WaitingRoomGateway implements OnGatewayConnection {
     return { joined: data.staffId };
   }
 
-  emitQueueUpdate(payload: QueueUpdatePayload): void {
-    this.server?.to(room(payload.staffId)).emit('queue:update', payload);
+  emitRoomUpdate(payload: RoomUpdatePayload): void {
+    this.server?.to(room(payload.staffId)).emit('waiting-room:update', payload);
   }
 }

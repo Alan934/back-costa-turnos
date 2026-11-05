@@ -1,7 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, Unique } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseEntity } from '@/common/base.entity';
-import { MembershipStatus } from '@/common/enums';
+import { MembershipStatus, WaitingRoomStatus } from '@/common/enums';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Comercio } from './comercio.entity';
 
@@ -76,4 +76,47 @@ export class Membership extends BaseEntity {
   @ApiProperty({ type: Boolean, example: false })
   @Column({ name: 'allow_provisional_bookings', type: 'boolean', default: false })
   allowProvisionalBookings!: boolean;
+
+  /**
+   * Atiende SIEMPRE por orden de llegada: no ofrece turnos con horario, todas sus franjas de
+   * trabajo son por orden de llegada. Es un interruptor reversible: al apagarlo, cada franja
+   * vuelve al modo que tenía configurado.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'walk_in_only', type: 'boolean', default: false })
+  walkInOnly!: boolean;
+
+  // ---- Sala de espera (pantalla publica + walk-ins) ----
+  /**
+   * Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del
+   * QR colgado en el local). Si esta apagado, el endpoint publico responde 404.
+   */
+  @ApiProperty({ type: Boolean, example: true })
+  @Column({ name: 'waiting_room_enabled', type: 'boolean', default: true })
+  waitingRoomEnabled!: boolean;
+
+  /**
+   * Permite que un cliente se anote solo escaneando el QR. La entrada queda en
+   * estado `requested` (pendiente) hasta que el profesional la acepta, asi nadie
+   * mete gente en la cola sin que el profesional lo vea.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'waiting_room_self_check_in', type: 'boolean', default: false })
+  waitingRoomSelfCheckIn!: boolean;
+
+  /** Estado operativo que ve el cliente en la pantalla publica. */
+  @ApiProperty({ enum: WaitingRoomStatus, enumName: 'WaitingRoomStatus' })
+  @Column({
+    name: 'waiting_room_status',
+    type: 'enum',
+    enum: WaitingRoomStatus,
+    enumName: 'waiting_room_status',
+    default: WaitingRoomStatus.Open,
+  })
+  waitingRoomStatus!: WaitingRoomStatus;
+
+  /** Aclaracion libre para la pantalla publica ("vuelvo 15:30"). */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ name: 'waiting_room_note', type: 'text', nullable: true })
+  waitingRoomNote!: string | null;
 }

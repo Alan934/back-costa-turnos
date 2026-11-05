@@ -243,6 +243,7 @@ export class MeService {
       serviceName: service?.name ?? 'Servicio',
       priceCents: service?.priceCents ?? 0,
       staffName: staff?.displayName ?? '',
+      publicToken: a.publicToken,
       business: {
         name: professional?.businessName ?? '',
         slug: professional?.slug ?? '',

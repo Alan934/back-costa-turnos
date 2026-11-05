@@ -73,7 +73,8 @@
     "sharp": "^0.33.5",
     "socket.io": "^4.8.1",
     "typeorm": "^0.3.20",
-    "uuidv7": "^1.0.2"
+    "uuidv7": "^1.0.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
@@ -88,6 +89,7 @@
     "@types/passport-google-oauth20": "^2.0.16",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^6.0.2",
+    "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
     "eslint": "^9.18.0",

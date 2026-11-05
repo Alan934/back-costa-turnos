@@ -30,6 +30,7 @@ import { RaffleEntry } from '@/modules/raffles/entities/raffle-entry.entity';
 import { Consent } from '@/modules/legal/entities/consent.entity';
 import { AuditLog } from '@/modules/legal/entities/audit-log.entity';
 import { FileObject } from '@/modules/files/entities/file.entity';
+import { PushSubscription } from '@/modules/push/entities/push-subscription.entity';
 
 /** Lista unica de entidades para el DataSource y TypeOrmModule. */
 export const entities = [
@@ -65,4 +66,5 @@ export const entities = [
   Consent,
   AuditLog,
   FileObject,
+  PushSubscription,
 ];

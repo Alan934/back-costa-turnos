@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { PaymentMethod, PaymentStatus } from '@/common/enums';
 import { AppConfig, MercadoPagoConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { AuditLog } from '@/modules/legal/entities/audit-log.entity';
 import { Payment } from './entities/payment.entity';
 import { PAYMENT_PROVIDER, PaymentProvider } from './ports/payment-provider.port';
 import { AppointmentConfirmer } from './ports/appointment-confirmer.port';
@@ -33,6 +34,8 @@ export class PaymentsService {
     private readonly payments: Repository<Payment>,
     @InjectRepository(Professional)
     private readonly professionals: Repository<Professional>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogs: Repository<AuditLog>,
     @Inject(PAYMENT_PROVIDER)
     private readonly provider: PaymentProvider,
     private readonly oauth: MercadoPagoOAuthService,
@@ -45,6 +48,34 @@ export class PaymentsService {
   /** AppointmentsService se registra aquí en su onModuleInit (ver port). */
   registerAppointmentConfirmer(confirmer: AppointmentConfirmer): void {
     this.confirmer = confirmer;
+  }
+
+  /**
+   * Deja constancia (append-only) de una acción que mueve plata: quién, cuándo, y los
+   * datos para reconstruir qué pasó. `accountId` null = lo hizo el sistema (webhook).
+   * Nunca debe tumbar el cobro: si el registro falla se loguea y se sigue.
+   */
+  async audit(input: {
+    tenantId: string;
+    accountId: string | null;
+    action: string;
+    paymentId: string;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      await this.auditLogs.save(
+        this.auditLogs.create({
+          accountId: input.accountId,
+          professionalId: input.tenantId,
+          action: input.action,
+          entity: 'payment',
+          entityId: input.paymentId,
+          metadata: input.metadata,
+        }),
+      );
+    } catch (err) {
+      this.logger.error(`No se pudo auditar ${input.action} de ${input.paymentId}: ${String(err)}`);
+    }
   }
 
   list(tenantId: string): Promise<Payment[]> {
@@ -68,7 +99,11 @@ export class PaymentsService {
    * profesional). Admite venir de un pago pendiente o de un pagaré (Deferred) que el
    * cliente finalmente pagó.
    */
-  async markCashPaid(tenantId: string, id: string): Promise<Payment> {
+  async markCashPaid(
+    tenantId: string,
+    id: string,
+    accountId: string | null = null,
+  ): Promise<Payment> {
     const payment = await this.findById(tenantId, id);
     if (!OFF_SYSTEM_METHODS.includes(payment.method)) {
       throw new BadRequestException(
@@ -78,10 +113,24 @@ export class PaymentsService {
     if (![PaymentStatus.Pending, PaymentStatus.Deferred].includes(payment.status)) {
       throw new BadRequestException('El pago no está pendiente de cobro');
     }
+    const previousStatus = payment.status;
     payment.status = PaymentStatus.Paid;
     payment.paidAt = new Date();
     payment.note = null;
-    return this.payments.save(payment);
+    const saved = await this.payments.save(payment);
+    await this.audit({
+      tenantId,
+      accountId,
+      action: 'payment.mark_paid',
+      paymentId: id,
+      metadata: {
+        via: 'payments',
+        method: saved.method,
+        previousStatus,
+        amountCents: saved.amountCents,
+      },
+    });
+    return saved;
   }
 
   /**
@@ -89,7 +138,12 @@ export class PaymentsService {
    * debiendo / pagará después). No cuenta como ingreso; aparece en el cierre de caja como
    * pendiente de cobro.
    */
-  async markCashDeferred(tenantId: string, id: string, note?: string): Promise<Payment> {
+  async markCashDeferred(
+    tenantId: string,
+    id: string,
+    note?: string,
+    accountId: string | null = null,
+  ): Promise<Payment> {
     const payment = await this.findById(tenantId, id);
     if (!OFF_SYSTEM_METHODS.includes(payment.method)) {
       throw new BadRequestException('Solo se difieren los cobros en efectivo o transferencia');
@@ -100,7 +154,15 @@ export class PaymentsService {
     payment.status = PaymentStatus.Deferred;
     payment.paidAt = null;
     payment.note = note ?? null;
-    return this.payments.save(payment);
+    const saved = await this.payments.save(payment);
+    await this.audit({
+      tenantId,
+      accountId,
+      action: 'payment.mark_deferred',
+      paymentId: id,
+      metadata: { via: 'payments', note: note ?? null, amountCents: saved.amountCents },
+    });
+    return saved;
   }
 
   /**
@@ -171,6 +233,13 @@ export class PaymentsService {
       payment.status = PaymentStatus.Paid;
       payment.paidAt = new Date();
       await this.payments.save(payment);
+      await this.audit({
+        tenantId: payment.professionalId,
+        accountId: null,
+        action: 'payment.mp_paid',
+        paymentId: payment.id,
+        metadata: { providerPaymentId: result.providerPaymentId, amountCents: payment.amountCents },
+      });
       // F4: si el turno aún no existe (flujo MercadoPago), se crea recién ahora a
       // partir del pending_booking. Idempotente del lado del confirmer.
       if (!payment.appointmentId && this.confirmer) {

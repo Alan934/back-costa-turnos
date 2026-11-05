@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -12,7 +13,7 @@ import {
   MinLength,
 } from 'class-validator';
 
-import { InvitationStatus } from '@/common/enums';
+import { InvitationStatus, WaitingRoomStatus } from '@/common/enums';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -102,6 +103,55 @@ export class UpdateMembershipDto {
   @IsOptional()
   @IsBoolean()
   allowProvisionalBookings?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: false,
+    description:
+      'Atiende SIEMPRE por orden de llegada: no ofrece turnos con horario. Reversible: al apagarlo, ' +
+      'cada franja de trabajo vuelve a su modo (con turno / por orden de llegada).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  walkInOnly?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: true,
+    description:
+      'Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del QR del local).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waitingRoomEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: false,
+    description:
+      'Permite que el cliente se anote solo escaneando el QR. Entra como pendiente hasta que el profesional lo acepta.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waitingRoomSelfCheckIn?: boolean;
+
+  @ApiPropertyOptional({
+    enum: WaitingRoomStatus,
+    enumName: 'WaitingRoomStatus',
+    description: 'Estado que ve el cliente en la pantalla pública: open | paused | closed.',
+  })
+  @IsOptional()
+  @IsEnum(WaitingRoomStatus)
+  waitingRoomStatus?: WaitingRoomStatus;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Aclaración libre para la pantalla pública ("vuelvo 15:30"). null/"" = sin nota.',
+  })
+  @IsOptional()
+  @IsString()
+  waitingRoomNote?: string | null;
 }
 
 export class InviteProfessionalDto {

@@ -1,10 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, EntityManager, In, Repository } from 'typeorm';
@@ -22,6 +25,7 @@ import {
   PaymentStatus,
   PaymentType,
   ProfessionalClientStatus,
+  WaitingRoomStatus,
 } from '@/common/enums';
 import { TenantContextService } from '@/common/context/tenant-context.service';
 import { PersonsService } from '@/modules/identity/persons.service';
@@ -45,7 +49,18 @@ import { Appointment } from './entities/appointment.entity';
 import { AppointmentAddon } from './entities/appointment-addon.entity';
 import { AddonBookingSnapshot, PendingBooking } from './entities/pending-booking.entity';
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
-import { QueueUpdatePayload, WaitingRoomGateway } from './waiting-room.gateway';
+import {
+  MyWaitingSpotDto,
+  SelfCheckInResultDto,
+  WaitingItemDto,
+  WaitingRoomDto,
+  WaitingRoomStatsDto,
+  LeaveResultDto,
+} from './dto/waiting-room.dto';
+import { WalkInStatusDto, WalkInWindowDto } from '@/modules/availability/dto/availability.dto';
+import { WaitingRoomGateway } from './waiting-room.gateway';
+import { WaitingRoomNotifier } from './waiting-room.notifier';
+import { PushService, BrowserSubscription } from '@/modules/push/push.service';
 
 // Estados que ocupan un horario.
 const ACTIVE_STATUSES = [
@@ -54,12 +69,52 @@ const ACTIVE_STATUSES = [
   AppointmentStatus.InProgress,
 ];
 
+// Estados finales: el turno ya no vuelve a la fila.
+const TERMINAL_STATUSES = [
+  AppointmentStatus.Done,
+  AppointmentStatus.NoShow,
+  AppointmentStatus.Cancelled,
+];
+
+/** Cuántas veces puede un cliente usar "me voy y vuelvo" (que no sea una excusa para no esperar). */
+const MAX_AWAYS = 2;
+
 // Métodos de cobro fuera del sistema (efectivo, transferencia/QR): precio base sin IVA,
 // turno fijo, el profesional confirma el cobro en persona (cierre de caja).
 const OFF_SYSTEM_METHODS = [PaymentMethod.Cash, PaymentMethod.Transfer];
 
 /** Minutos que un horario queda reservado (hold) mientras se paga con MercadoPago. */
 const HOLD_TTL_MINUTES = 15;
+
+/** Sin membresía resuelta no hay franjas: la sala funciona como siempre. */
+const EMPTY_ATTENDANCE: WalkInStatusDto = {
+  walkInOnly: false,
+  hasSchedule: false,
+  openNow: true,
+  todayWindows: [],
+  nextWindow: null,
+  windows: [],
+};
+
+const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+/** " Próxima franja: el sábado de 09:00 a 13:00." (o vacío si no hay ninguna). */
+function describeNextWindow(next: WalkInWindowDto | null): string {
+  if (!next) return '';
+  return ` Próxima franja: el ${DAY_NAMES[next.dayOfWeek]} de ${next.startTime} a ${next.endTime}.`;
+}
+
+/**
+ * Orden de la cola de la sala: primero los marcados como prioritarios; dentro de cada
+ * grupo, por `queueRank` (que el profesional puede reescribir al reordenar; por defecto
+ * es el instante de llegada) y, a igualdad, por número de turno.
+ */
+function byQueueOrder(a: Appointment, b: Appointment): number {
+  if (a.isPriority !== b.isPriority) return a.isPriority ? -1 : 1;
+  const ra = a.queueRank ?? a.checkedInAt?.getTime() ?? 0;
+  const rb = b.queueRank ?? b.checkedInAt?.getTime() ?? 0;
+  return ra - rb || (a.ticketNumber ?? 0) - (b.ticketNumber ?? 0);
+}
 
 @Injectable()
 export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
@@ -94,11 +149,31 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly catalog: CatalogService,
     private readonly availability: AvailabilityService,
     private readonly subscriptions: SubscriptionsService,
+    private readonly notifier: WaitingRoomNotifier,
+    private readonly push: PushService,
   ) {}
 
   /** Se registra como confirmador para que el webhook de pagos cree el turno. */
   onModuleInit(): void {
     this.paymentsService.registerAppointmentConfirmer(this);
+  }
+
+  /**
+   * Rechaza una reserva con horario dentro de una franja por orden de llegada. La pantalla ya no
+   * ofrece esos horarios, pero la API es pública: sin esta guarda alguien podría reservar un
+   * turno en un tramo donde el profesional atiende solo por llegada.
+   */
+  private async assertNotWalkInSlot(
+    membershipId: string,
+    serviceId: string,
+    startAt: string,
+  ): Promise<void> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    if (await this.availability.isWalkInAt(membership, serviceId, new Date(startAt))) {
+      throw new BadRequestException(
+        'En ese horario se atiende por orden de llegada: no se reservan turnos. Anotate en la sala de espera del local.',
+      );
+    }
   }
 
   /**
@@ -127,6 +202,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     accountId?: string | null,
   ): Promise<Appointment> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    // Lo que reserva el propio cliente respeta las franjas por orden de llegada; el profesional
+    // puede cargar un turno a mano donde quiera.
+    if (createdVia === CreatedVia.ClientSelf) {
+      await this.assertNotWalkInSlot(membershipId, dto.serviceId, dto.startAt);
+    }
     return this.book(professionalId, { ...dto, staffId }, createdVia, accountId);
   }
 
@@ -146,6 +226,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     accountId?: string | null,
   ): Promise<{ appointment: Appointment | null; payment: Payment; mpInitPoint?: string }> {
     const { professionalId, staffId } = await this.resolveMembershipBookingTarget(membershipId);
+    await this.assertNotWalkInSlot(membershipId, dto.serviceId, dto.startAt);
     return this.bookWithDeposit(professionalId, { ...dto, staffId }, accountId);
   }
 
@@ -995,7 +1076,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const appointment = await this.findById(tenantId, id);
     apply(appointment);
     const saved = await this.appointments.save(appointment);
-    await this.emitWaitingRoom(tenantId, appointment.staffId);
+    // Terminó, no vino o se canceló: ya no hay nadie esperando a quien avisarle.
+    if (TERMINAL_STATUSES.includes(saved.status)) await this.push.clearAppointment(saved.id);
+    await this.emitWaitingRoom(tenantId, appointment.staffId, appointment.comercioId);
     return saved;
   }
 
@@ -1008,14 +1091,27 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
   }
 
-  start(tenantId: string, id: string): Promise<Appointment> {
-    return this.transition(tenantId, id, (a) => {
-      if (a.status !== AppointmentStatus.Confirmed) {
-        throw new BadRequestException('Solo se inician turnos confirmados');
-      }
+  async start(tenantId: string, id: string): Promise<Appointment> {
+    // Empezar a atender implica que la persona está presente: si el profesional
+    // nunca marcó la llegada (arrancó desde la agenda), se marca ahora para que
+    // aparezca como "atendiendo" en la sala y tenga su número de turno.
+    const appointment = await this.findById(tenantId, id);
+    if (appointment.status !== AppointmentStatus.Confirmed) {
+      throw new BadRequestException('Solo se inician turnos confirmados');
+    }
+    await this.markArrival(appointment);
+    const wasCalled = !!appointment.calledAt;
+    const started = await this.transition(tenantId, id, (a) => {
       a.status = AppointmentStatus.InProgress;
       a.actualStartAt = new Date();
+      a.awayUntil = null;
     });
+    // Si el profesional pasó directo a "Atender" sin llamarlo antes, el cliente que
+    // espera con el celular en el bolsillo se entera igual.
+    if (!wasCalled) {
+      await this.notifier.notifyCalled(started, await this.staffName(started.staffId));
+    }
+    return started;
   }
 
   async complete(
@@ -1029,6 +1125,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         throw new BadRequestException('Solo se completan turnos en progreso');
       }
       a.status = AppointmentStatus.Done;
+      a.completedAt = new Date();
     });
     if (cashOutcome) {
       await this.applyCashOutcome(tenantId, id, cashOutcome, note);
@@ -1088,55 +1185,754 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
   }
 
-  // ---- Sala de espera (ETA) ----
-  async computeWaitingRoom(tenantId: string, staffId: string): Promise<QueueUpdatePayload> {
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date();
-    dayEnd.setHours(23, 59, 59, 999);
+  // ---- Sala de espera ----
+  /**
+   * Membresía cuya configuración de sala aplica. Si no viene una explícita, se
+   * usa la personal del profesional (su comercio-de-uno) y, si no tiene, la
+   * primera activa. Es la que define si la sala es pública, si acepta self
+   * check-in y si está abierta/en pausa.
+   */
+  private async resolveWaitingRoomMembership(
+    professionalId: string,
+    membershipId?: string,
+  ): Promise<Membership | null> {
+    if (membershipId) return this.comercios.getMembershipById(membershipId);
+    const personal = await this.comercios.getPersonalMembership(professionalId).catch(() => null);
+    if (personal) return personal;
+    const mine = await this.comercios.listMyMemberships(professionalId);
+    return mine[0] ?? null;
+  }
 
-    const appts = await this.appointments.find({
-      where: {
-        professionalId: tenantId,
-        staffId,
-        status: In([AppointmentStatus.Confirmed, AppointmentStatus.InProgress]),
-        startAt: Between(dayStart, dayEnd),
-      },
-      order: { startAt: 'ASC' },
-    });
+  /** Nombre de pila, para no exponer el apellido en una pantalla pública. */
+  private firstName(fullName?: string | null): string {
+    const first = (fullName ?? '').trim().split(/\s+/)[0];
+    return first || 'Cliente';
+  }
+
+  /**
+   * Estado de la sala de espera de una agenda (staff), hoy.
+   *
+   * La cola son SOLO los presentes (`checkedInAt` seteado): un turno agendado
+   * para las 11 no ocupa lugar hasta que la persona llega, así la posición y el
+   * ETA que ve el cliente no cuentan gente que todavía no apareció. Se ordena
+   * por hora de llegada (a igual llegada, por hora del turno).
+   *
+   * `pending` son los self check-in que esperan que el profesional los acepte
+   * (status `requested`): no cuentan para la posición ni para el ETA.
+   */
+  async computeWaitingRoom(
+    tenantId: string,
+    staffId: string,
+    membershipId?: string,
+  ): Promise<WaitingRoomDto> {
+    const { start: dayStart, end: dayEnd } = await this.todayBounds(tenantId);
+
+    const membership = await this.resolveWaitingRoomMembership(tenantId, membershipId);
+    const [staff, appts] = await Promise.all([
+      this.staff.findOne({ where: { id: staffId } }),
+      this.appointments.find({
+        where: {
+          professionalId: tenantId,
+          staffId,
+          // Un walk-in de las 19:50 puede tener su `startAt` hoy y su fin mañana:
+          // el filtro por día va sobre la llegada real cuando la hay.
+          status: In([
+            AppointmentStatus.Requested,
+            AppointmentStatus.Confirmed,
+            AppointmentStatus.InProgress,
+          ]),
+          checkedInAt: Between(dayStart, dayEnd),
+          ...(membership ? { comercioId: membership.comercioId } : {}),
+        },
+        order: { checkedInAt: 'ASC', startAt: 'ASC' },
+      }),
+    ]);
 
     const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
+    const personIds = [...new Set(appts.map((a) => a.personId))];
+    const [services, persons, learned] = await Promise.all([
+      serviceIds.length ? this.services.find({ where: { id: In(serviceIds) } }) : [],
+      personIds.length ? this.persons.findByIds(personIds) : [],
+      this.learnedDurations(tenantId, serviceIds),
+    ]);
+    const serviceById = new Map(services.map((s) => [s.id, s]));
+    const personById = new Map(persons.map((p) => [p.id, p]));
+
+    // ETA aprendido: cuánto tarda DE VERDAD este profesional en cada servicio (promedio
+    // de sus últimas atenciones). Sin suficientes datos, cae a la duración configurada.
+    const duration = (a: Appointment) =>
+      learned.get(a.serviceId) ?? serviceById.get(a.serviceId)?.durationMinutes ?? 30;
+
+    const attendance = membership
+      ? await this.availability.getWalkInSchedule(membership)
+      : EMPTY_ATTENDANCE;
+
+    const now = Date.now();
+    // El cursor arranca en "ahora" y avanza con la duración de cada uno. Si hay
+    // alguien en atención, el primero de la cola no puede empezar antes de que
+    // termine (estimado sobre su inicio real).
+    let cursor = now;
+    const inProgress = appts.find((a) => a.status === AppointmentStatus.InProgress);
+    if (inProgress?.actualStartAt) {
+      cursor = Math.max(cursor, inProgress.actualStartAt.getTime() + duration(inProgress) * 60_000);
+    }
+
+    const isAway = (a: Appointment) => !!a.awayUntil && a.awayUntil.getTime() > now;
+
+    const toItem = (a: Appointment, position: number, etaMinutes: number): WaitingItemDto => ({
+      appointmentId: a.id,
+      displayName: this.firstName(personById.get(a.personId)?.fullName),
+      ticketNumber: a.ticketNumber ?? 0,
+      position,
+      etaMinutes,
+      status: a.status,
+      serviceName: serviceById.get(a.serviceId)?.name ?? 'Servicio',
+      startAt: a.startAt.toISOString(),
+      checkedInAt: a.checkedInAt ? a.checkedInAt.toISOString() : null,
+      isWalkIn: a.createdVia === CreatedVia.WalkIn,
+      isProvisional: a.isProvisional,
+      isPriority: a.isPriority,
+      calledAt: a.calledAt ? a.calledAt.toISOString() : null,
+      callCount: a.callCount,
+      awayUntil: isAway(a) && a.awayUntil ? a.awayUntil.toISOString() : null,
+      etaLearned: learned.has(a.serviceId),
+    });
+
+    // Quien está ausente ("me voy y vuelvo") conserva su lugar pero no cuenta: no suma a
+    // la posición de los de atrás ni consume tiempo en el ETA, porque a esa hora no estaría.
+    let ahead = 0;
+    const queue = appts
+      .filter((a) => a.status === AppointmentStatus.Confirmed)
+      .sort(byQueueOrder)
+      .map((a) => {
+        const etaMinutes = Math.max(0, Math.round((cursor - now) / 60_000));
+        const item = toItem(a, ahead, etaMinutes);
+        if (!isAway(a)) {
+          ahead++;
+          cursor += duration(a) * 60_000;
+        }
+        return item;
+      });
+
+    return {
+      staffId,
+      staffName: staff?.displayName ?? 'Profesional',
+      membershipId: membership?.id ?? '',
+      status: membership?.waitingRoomStatus ?? WaitingRoomStatus.Open,
+      note: membership?.waitingRoomNote ?? null,
+      selfCheckInEnabled: membership?.waitingRoomSelfCheckIn ?? false,
+      selfCheckInOpen:
+        !!membership?.waitingRoomEnabled &&
+        !!membership.waitingRoomSelfCheckIn &&
+        membership.waitingRoomStatus !== WaitingRoomStatus.Closed &&
+        // Si el profesional definió franjas por orden de llegada, solo se anota dentro de ellas.
+        (!attendance.hasSchedule || attendance.openNow),
+      attendance,
+      nowServing: inProgress ? toItem(inProgress, 0, 0) : null,
+      queue,
+      pending: appts
+        .filter((a) => a.status === AppointmentStatus.Requested)
+        .map((a) => toItem(a, 0, 0)),
+      updatedAt: new Date(now).toISOString(),
+    };
+  }
+
+  /** Mínimo de atenciones terminadas para confiar en el promedio real en vez del configurado. */
+  private static readonly MIN_LEARNED_SAMPLES = 3;
+
+  /**
+   * Duración real promedio (minutos) por servicio de este profesional, sobre sus
+   * atenciones de los últimos 90 días. Se descartan las que quedaron "abiertas" horas
+   * (se olvidó darle a Terminé: más de 3× la duración configurada) y las de menos de
+   * 1 minuto (se tocó Atender y Terminé sin querer), que ensucian el promedio.
+   */
+  private async learnedDurations(
+    professionalId: string,
+    serviceIds: string[],
+  ): Promise<Map<string, number>> {
+    if (serviceIds.length === 0) return new Map();
+    const rows: { service_id: string; avg_min: string }[] = await this.appointments.query(
+      `SELECT a.service_id, AVG(EXTRACT(EPOCH FROM (a.completed_at - a.actual_start_at)) / 60) AS avg_min
+         FROM appointment a
+         JOIN service s ON s.id = a.service_id
+        WHERE a.professional_id = $1
+          AND a.service_id = ANY($2::uuid[])
+          AND a.completed_at IS NOT NULL
+          AND a.actual_start_at IS NOT NULL
+          AND a.completed_at > now() - interval '90 days'
+          AND a.completed_at - a.actual_start_at BETWEEN interval '1 minute'
+                AND (s.duration_minutes * 3) * interval '1 minute'
+        GROUP BY a.service_id
+       HAVING COUNT(*) >= $3`,
+      [professionalId, serviceIds, AppointmentsService.MIN_LEARNED_SAMPLES],
+    );
+    return new Map(rows.map((r) => [r.service_id, Math.max(1, Math.round(Number(r.avg_min)))]));
+  }
+
+  /** Sala de espera de una membresía (para la pantalla pública del comercio). */
+  async computeWaitingRoomForMembership(membership: Membership): Promise<WaitingRoomDto> {
+    const staff = await this.staff.findOne({
+      where: { professionalId: membership.professionalId },
+    });
+    if (!staff) throw new NotFoundException('El profesional no tiene agenda configurada');
+    return this.computeWaitingRoom(membership.professionalId, staff.id, membership.id);
+  }
+
+  /**
+   * Marca la llegada: asigna número de turno del día (por agenda) y el token del
+   * link personal. Idempotente: si ya hizo check-in, no se le mueve el número.
+   */
+  private async markArrival(appointment: Appointment): Promise<Appointment> {
+    if (appointment.checkedInAt) return appointment;
+    const { start: dayStart, end: dayEnd } = await this.todayBounds(appointment.professionalId);
+
+    // MAX+1 solo es correcto si nadie más lo calcula a la vez: dos check-ins
+    // simultáneos (o un self check-in coincidiendo con un walk-in) leían el mismo
+    // máximo y se llevaban el mismo número. El lock de asesoramiento serializa la
+    // asignación por agenda y se libera solo al cerrar la transacción.
+    return this.appointments.manager.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `ticket:${appointment.staffId}`,
+      ]);
+      const repo = manager.getRepository(Appointment);
+      const { max } = await repo
+        .createQueryBuilder('a')
+        .select('MAX(a.ticket_number)', 'max')
+        .where('a.staff_id = :staffId', { staffId: appointment.staffId })
+        .andWhere('a.checked_in_at BETWEEN :dayStart AND :dayEnd', { dayStart, dayEnd })
+        .getRawOne<{ max: number | null }>()
+        .then((r) => r ?? { max: null });
+
+      appointment.checkedInAt = new Date();
+      appointment.ticketNumber = (max ?? 0) + 1;
+      appointment.queueRank = appointment.checkedInAt.getTime();
+      appointment.publicToken ??= randomBytes(16).toString('base64url');
+      return repo.save(appointment);
+    });
+  }
+
+  /**
+   * Límites del "hoy" en la zona horaria del profesional. NO se puede usar
+   * `setHours` sobre el Date del servidor: en producción (contenedor en UTC) el día
+   * cortaría a las 21:00 de Argentina, la fila se vaciaría a esa hora y los
+   * números de turno volverían a 1 en plena jornada.
+   */
+  private async todayBounds(professionalId: string): Promise<{ start: Date; end: Date }> {
+    const pro = await this.professionals.findOne({
+      where: { id: professionalId },
+      select: { id: true, timezone: true },
+    });
+    const now = DateTime.now().setZone(pro?.timezone || 'America/Argentina/Buenos_Aires');
+    return { start: now.startOf('day').toJSDate(), end: now.endOf('day').toJSDate() };
+  }
+
+  /** El profesional marca que el cliente de un turno agendado ya llegó. */
+  async checkIn(tenantId: string, id: string): Promise<Appointment> {
+    const appointment = await this.findById(tenantId, id);
+    if ([AppointmentStatus.Done, AppointmentStatus.Cancelled].includes(appointment.status)) {
+      throw new BadRequestException('El turno ya está cerrado');
+    }
+    const saved = await this.markArrival(appointment);
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /** Deshace el check-in (se marcó por error): sale de la cola, conserva el turno. */
+  async undoCheckIn(tenantId: string, id: string): Promise<Appointment> {
+    const appointment = await this.findById(tenantId, id);
+    this.resetQueueState(appointment);
+    const saved = await this.appointments.save(appointment);
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /** Saca a un turno de la fila y limpia todo lo que dependía de estar en ella. */
+  private resetQueueState(a: Appointment): void {
+    a.checkedInAt = null;
+    a.ticketNumber = null;
+    a.queueRank = null;
+    a.isPriority = false;
+    a.calledAt = null;
+    a.callCount = 0;
+    a.awayUntil = null;
+    a.notifiedSecondAt = null;
+    a.notifiedNextAt = null;
+  }
+
+  /**
+   * Cliente que llega sin turno. Crea el turno en el momento (`startAt` = ahora)
+   * y lo mete en la cola ya presente. A diferencia de una reserva, NO valida
+   * disponibilidad ni solapamiento: el orden lo da la cola, no la grilla.
+   *
+   * `status`: confirmado si lo carga el profesional; `requested` (pendiente de
+   * que lo acepte) si el propio cliente se anotó escaneando el QR.
+   */
+  async createWalkIn(
+    professionalId: string,
+    membership: Membership,
+    input: {
+      staffId: string;
+      serviceId: string;
+      personId?: string;
+      fullName?: string;
+      phone?: string;
+      email?: string;
+    },
+    opts: { needsApproval: boolean; accountId?: string | null },
+  ): Promise<Appointment> {
+    const service = await this.loadService(input.serviceId);
+    if (service.comercioId !== membership.comercioId) {
+      throw new NotFoundException('El servicio no pertenece a este comercio');
+    }
+    if (!(await this.catalog.isAssigned(service.id, membership.id))) {
+      throw new NotFoundException('El profesional no ofrece este servicio');
+    }
+
+    const personId = await this.resolvePersonId(input, opts.accountId);
+    const startAt = new Date();
+    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+
+    const appointment = this.appointments.create({
+      professionalId,
+      comercioId: membership.comercioId,
+      membershipId: membership.id,
+      staffId: input.staffId,
+      personId,
+      serviceId: service.id,
+      startAt,
+      endAt,
+      status: opts.needsApproval ? AppointmentStatus.Requested : AppointmentStatus.Confirmed,
+      isProvisional: false,
+      createdVia: CreatedVia.WalkIn,
+    });
+    const saved = await this.markArrival(await this.appointments.save(appointment));
+    await this.ensureProfessionalClient(professionalId, personId);
+    await this.emitWaitingRoom(professionalId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /**
+   * Walk-in cargado por el profesional desde su panel. La membresía sale del
+   * comercio del servicio elegido (un profesional puede atender en varios).
+   */
+  async createWalkInForTenant(
+    tenantId: string,
+    dto: {
+      staffId: string;
+      serviceId: string;
+      personId?: string;
+      fullName?: string;
+      phone?: string;
+      email?: string;
+    },
+  ): Promise<Appointment> {
+    const service = await this.loadService(dto.serviceId);
+    const membership = await this.comercios.getActiveMembership(tenantId, service.comercioId);
+    return this.createWalkIn(tenantId, membership, dto, { needsApproval: false });
+  }
+
+  /**
+   * Self check-in público: el cliente se anota escaneando el QR del local. Queda
+   * pendiente de aprobación del profesional, así nadie mete gente en la cola sin
+   * que él lo vea.
+   */
+  async selfCheckIn(
+    membership: Membership,
+    input: { serviceId: string; fullName: string; phone: string; email?: string },
+    accountId?: string | null,
+  ): Promise<SelfCheckInResultDto> {
+    if (!membership.waitingRoomEnabled || !membership.waitingRoomSelfCheckIn) {
+      throw new ForbiddenException('Este local no permite anotarse desde el celular.');
+    }
+    if (membership.waitingRoomStatus === WaitingRoomStatus.Closed) {
+      throw new ForbiddenException('La sala de espera está cerrada en este momento.');
+    }
+    // Si el profesional define franjas por orden de llegada, solo se puede anotar dentro de ellas
+    // (fuera de esas horas se atiende con turno). Sin franjas definidas no hay restricción.
+    const attendance = await this.availability.getWalkInSchedule(membership, input.serviceId);
+    if (attendance.hasSchedule && !attendance.openNow) {
+      throw new ForbiddenException(
+        `Ahora no se atiende por orden de llegada.${describeNextWindow(attendance.nextWindow)}`,
+      );
+    }
+    const staff = await this.staff.findOne({
+      where: { professionalId: membership.professionalId },
+    });
+    if (!staff) throw new NotFoundException('El profesional no tiene agenda configurada');
+
+    const appointment = await this.createWalkIn(
+      membership.professionalId,
+      membership,
+      { staffId: staff.id, ...input },
+      { needsApproval: true, accountId },
+    );
+    // Avisa al profesional (web push): en una fila con gente, nadie mira la pantalla.
+    void this.notifyProfessionalOfSelfCheckIn(membership.professionalId, input.fullName);
+    return {
+      token: appointment.publicToken ?? '',
+      ticketNumber: appointment.ticketNumber ?? 0,
+      needsApproval: appointment.status === AppointmentStatus.Requested,
+    };
+  }
+
+  private async notifyProfessionalOfSelfCheckIn(
+    professionalId: string,
+    fullName: string,
+  ): Promise<void> {
+    try {
+      const pro = await this.professionals.findOne({
+        where: { id: professionalId },
+        select: { id: true, accountId: true },
+      });
+      if (!pro) return;
+      await this.push.sendToAccount(pro.accountId, {
+        title: 'Alguien se anotó en la fila',
+        body: `${this.firstName(fullName)} se anotó desde su celular. Aceptalo para que entre.`,
+        url: '/app/sala',
+        tag: 'sala-pendiente',
+      });
+    } catch (err) {
+      this.logger.warn(`No se pudo avisar al profesional: ${String(err)}`);
+    }
+  }
+
+  /** Vista personal del cliente por token opaco (link del QR). Sin auth. */
+  async getSpotByToken(token: string): Promise<MyWaitingSpotDto> {
+    const appointment = await this.appointments.findOne({ where: { publicToken: token } });
+    if (!appointment) throw new NotFoundException('No encontramos tu lugar en la fila');
+    const room = await this.computeWaitingRoom(
+      appointment.professionalId,
+      appointment.staffId,
+      appointment.membershipId,
+    );
+    const me =
+      room.nowServing?.appointmentId === appointment.id
+        ? room.nowServing
+        : ([...room.queue, ...room.pending].find((i) => i.appointmentId === appointment.id) ??
+          null);
+    return {
+      me,
+      // La pantalla del cliente no necesita ver quiénes están pendientes de aprobación.
+      room: { ...room, pending: [] },
+      finished: !me,
+      outcome: me ? 'waiting' : this.outcomeOf(appointment),
+      pushEnabled: this.push.enabled,
+      pushSubscribed: await this.push.hasAppointmentSubscription(appointment.id),
+      awaysLeft: Math.max(0, MAX_AWAYS - appointment.awayCount),
+    };
+  }
+
+  /** Por qué ya no está en la fila: el cliente ve un mensaje distinto en cada caso. */
+  private outcomeOf(a: Appointment): MyWaitingSpotDto['outcome'] {
+    if (a.status === AppointmentStatus.Done) return 'done';
+    if (a.status === AppointmentStatus.NoShow) return 'no_show';
+    if (a.status === AppointmentStatus.Cancelled) return 'left';
+    return 'not_in_queue';
+  }
+
+  // ---- Acciones del profesional sobre la fila ----
+
+  /** Presentes y confirmados de la misma agenda/comercio que `ref`, en el orden real de la cola. */
+  private async orderedQueueOf(ref: Appointment): Promise<Appointment[]> {
+    const { start, end } = await this.todayBounds(ref.professionalId);
+    const rows = await this.appointments.find({
+      where: {
+        professionalId: ref.professionalId,
+        staffId: ref.staffId,
+        comercioId: ref.comercioId,
+        status: AppointmentStatus.Confirmed,
+        checkedInAt: Between(start, end),
+      },
+    });
+    return rows.sort(byQueueOrder);
+  }
+
+  /**
+   * "Pasá, te toca": el profesional llama a alguien de la fila. Le llega un push (con
+   * vibración) y su pantalla pasa a "¡Es tu turno!". Se puede repetir si no responde.
+   * No exige que el profesional esté libre: puede ir llamando al siguiente mientras
+   * termina con el actual.
+   */
+  async call(tenantId: string, id: string): Promise<Appointment> {
+    const a = await this.findById(tenantId, id);
+    if (a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+      throw new BadRequestException('Solo se llama a quien está en la fila');
+    }
+    a.calledAt = new Date();
+    a.callCount += 1;
+    a.awayUntil = null; // si estaba ausente, el llamado lo da por vuelto
+    const saved = await this.appointments.save(a);
+    await this.notifier.notifyCalled(saved, await this.staffName(saved.staffId));
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /**
+   * "No respondió": lo manda al final de la fila en vez de marcarlo como que no vino.
+   * Conserva su número de turno y vuelve a recibir los avisos al reacercarse.
+   */
+  async sendToBack(tenantId: string, id: string): Promise<Appointment> {
+    const a = await this.findById(tenantId, id);
+    if (a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+      throw new BadRequestException('Solo se reordena a quien está en la fila');
+    }
+    const queue = await this.orderedQueueOf(a);
+    const maxRank = Math.max(0, ...queue.map((q) => q.queueRank ?? q.checkedInAt?.getTime() ?? 0));
+    a.queueRank = maxRank + 1000;
+    a.isPriority = false;
+    a.calledAt = null;
+    a.awayUntil = null;
+    a.notifiedSecondAt = null;
+    a.notifiedNextAt = null;
+    const saved = await this.appointments.save(a);
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /**
+   * Sube o baja un lugar en la fila. Reescribe los rangos de toda la cola de forma
+   * consecutiva (en vez de intercambiar solo dos): si dos tuvieran el mismo rango un
+   * intercambio no cambiaría nada. Solo se mueve dentro del mismo grupo de prioridad;
+   * para cruzar ese límite está "Urgente".
+   */
+  async moveInQueue(tenantId: string, id: string, direction: 'up' | 'down'): Promise<Appointment> {
+    const a = await this.findById(tenantId, id);
+    const queue = await this.orderedQueueOf(a);
+    const idx = queue.findIndex((q) => q.id === a.id);
+    if (idx < 0) throw new BadRequestException('Solo se reordena a quien está en la fila');
+    const j = direction === 'up' ? idx - 1 : idx + 1;
+    if (j < 0 || j >= queue.length) return a;
+    if (queue[j].isPriority !== queue[idx].isPriority) {
+      throw new BadRequestException('Usá "Urgente" para pasar al frente de la fila');
+    }
+    [queue[idx], queue[j]] = [queue[j], queue[idx]];
+    queue.forEach((q, i) => (q.queueRank = (i + 1) * 1000));
+    await this.appointments.save(queue);
+    await this.emitWaitingRoom(tenantId, a.staffId, a.comercioId);
+    return queue.find((q) => q.id === a.id) ?? a;
+  }
+
+  /** Marca/desmarca a alguien como urgente: pasa al frente de la fila. */
+  async setPriority(tenantId: string, id: string, priority: boolean): Promise<Appointment> {
+    const a = await this.findById(tenantId, id);
+    if (a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+      throw new BadRequestException('Solo se prioriza a quien está en la fila');
+    }
+    a.isPriority = priority;
+    // Al reordenarse de grupo, que no quede sin avisos por haber estado "primero" antes.
+    a.notifiedSecondAt = null;
+    a.notifiedNextAt = null;
+    const saved = await this.appointments.save(a);
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  // ---- Acciones del cliente (por el token de su link personal) ----
+
+  private async findByToken(token: string): Promise<Appointment> {
+    const a = await this.appointments.findOne({ where: { publicToken: token } });
+    if (!a) throw new NotFoundException('No encontramos tu lugar en la fila');
+    return a;
+  }
+
+  /**
+   * "Ya no voy". Si llegó sin turno (o todavía estaba pendiente de aceptación), el turno
+   * se anula. Si tenía un turno agendado, solo sale de la fila y el turno se conserva.
+   */
+  async leaveByToken(token: string): Promise<LeaveResultDto> {
+    const a = await this.findByToken(token);
+    if (a.status === AppointmentStatus.InProgress) {
+      throw new BadRequestException('Ya te están atendiendo');
+    }
+    if (TERMINAL_STATUSES.includes(a.status)) {
+      throw new BadRequestException('Ya no estás en la fila');
+    }
+    const scheduled =
+      a.createdVia !== CreatedVia.WalkIn && a.status === AppointmentStatus.Confirmed;
+    if (scheduled) {
+      this.resetQueueState(a);
+    } else {
+      a.status = AppointmentStatus.Cancelled;
+      a.cancellationReason = CancellationReason.Client;
+    }
+    await this.appointments.save(a);
+    await this.push.clearAppointment(a.id);
+    await this.emitWaitingRoom(a.professionalId, a.staffId, a.comercioId);
+    return { keptAppointment: scheduled };
+  }
+
+  /**
+   * "Me voy y vuelvo": conserva el lugar y el número, pero se lo saltea mientras dura
+   * (hasta 15 min) y no cuenta en el ETA de los de atrás. Tope de {@link MAX_AWAYS} veces,
+   * para que no sea una forma de dejar el lugar guardado todo el día.
+   */
+  async setAwayByToken(token: string, minutes = 10): Promise<Appointment> {
+    const a = await this.findByToken(token);
+    if (a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+      throw new BadRequestException('Solo podés ausentarte si estás en la fila');
+    }
+    if (a.calledAt) throw new BadRequestException('Ya te llamaron: acercate');
+    if (a.awayCount >= MAX_AWAYS) {
+      throw new BadRequestException(`Ya usaste tus ${MAX_AWAYS} ausencias de hoy`);
+    }
+    const mins = Math.min(15, Math.max(1, Math.round(minutes)));
+    a.awayUntil = new Date(Date.now() + mins * 60_000);
+    a.awayCount += 1;
+    const saved = await this.appointments.save(a);
+    await this.emitWaitingRoom(a.professionalId, a.staffId, a.comercioId);
+    // Al vencer la ausencia nada "cambia" en la base, pero las pantallas deben reflejar que
+    // volvió a contar. Se re-emite justo después (single-instance; en multi-instancia los
+    // clientes igual refrescan por polling como respaldo).
+    setTimeout(
+      () =>
+        void this.emitWaitingRoom(a.professionalId, a.staffId, a.comercioId).catch(() => undefined),
+      mins * 60_000 + 1_500,
+    ).unref();
+    return saved;
+  }
+
+  /** "Ya volví": termina la ausencia antes de tiempo. */
+  async backByToken(token: string): Promise<Appointment> {
+    const a = await this.findByToken(token);
+    a.awayUntil = null;
+    const saved = await this.appointments.save(a);
+    await this.emitWaitingRoom(a.professionalId, a.staffId, a.comercioId);
+    return saved;
+  }
+
+  async subscribePushByToken(token: string, sub: BrowserSubscription): Promise<void> {
+    if (!this.push.enabled) {
+      throw new ServiceUnavailableException('Los avisos push no están disponibles');
+    }
+    const a = await this.findByToken(token);
+    if (TERMINAL_STATUSES.includes(a.status)) {
+      throw new BadRequestException('Este turno ya terminó');
+    }
+    await this.push.subscribeAppointment(a.id, sub);
+  }
+
+  async unsubscribePushByToken(token: string): Promise<void> {
+    const a = await this.findByToken(token);
+    await this.push.clearAppointment(a.id);
+  }
+
+  // ---- Estadísticas de la sala ----
+
+  /**
+   * Resumen de los últimos `days` días de una agenda: cuánto espera la gente, cuánto
+   * tarda de verdad una atención, a qué horas llega más gente, qué servicios pesan más.
+   * Las horas se agrupan en la zona del profesional, no en la del servidor.
+   */
+  async getWaitingRoomStats(
+    tenantId: string,
+    staffId: string,
+    days = 30,
+  ): Promise<WaitingRoomStatsDto> {
+    const range = Math.min(365, Math.max(1, Math.round(days)));
+    const pro = await this.professionals.findOne({
+      where: { id: tenantId },
+      select: { id: true, timezone: true },
+    });
+    const tz = pro?.timezone || 'America/Argentina/Buenos_Aires';
+    const from = DateTime.now()
+      .setZone(tz)
+      .startOf('day')
+      .minus({ days: range - 1 })
+      .toJSDate();
+
+    const rows: {
+      status: string;
+      created_via: string;
+      service_id: string;
+      hour: number;
+      wait_min: string | null;
+      service_min: string | null;
+    }[] = await this.appointments.query(
+      `SELECT a.status, a.created_via, a.service_id,
+              EXTRACT(HOUR FROM a.checked_in_at AT TIME ZONE $3::text)::int AS hour,
+              EXTRACT(EPOCH FROM (a.actual_start_at - a.checked_in_at)) / 60 AS wait_min,
+              EXTRACT(EPOCH FROM (a.completed_at - a.actual_start_at)) / 60 AS service_min
+         FROM appointment a
+        WHERE a.professional_id = $1 AND a.staff_id = $2 AND a.checked_in_at >= $4`,
+      [tenantId, staffId, tz, from],
+    );
+
+    const done = rows.filter((r) => (r.status as AppointmentStatus) === AppointmentStatus.Done);
+    const waits = done.map((r) => Number(r.wait_min)).filter((n) => Number.isFinite(n) && n >= 0);
+    // Una atención "abierta" horas (se olvidó Terminé) distorsiona el promedio.
+    const serviceMins = done
+      .map((r) => Number(r.service_min))
+      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 240);
+    const avg = (xs: number[]) =>
+      xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+
+    const arrivalsByHour = new Map<number, number>();
+    for (const r of rows) arrivalsByHour.set(r.hour, (arrivalsByHour.get(r.hour) ?? 0) + 1);
+    const byHour = [...arrivalsByHour.entries()]
+      .map(([hour, arrivals]) => ({ hour, arrivals }))
+      .sort((a, b) => a.hour - b.hour);
+    const peakHours = [...byHour]
+      .sort((a, b) => b.arrivals - a.arrivals)
+      .slice(0, 3)
+      .map((h) => h.hour)
+      .sort((a, b) => a - b);
+
+    const serviceIds = [...new Set(done.map((r) => r.service_id))];
     const services = serviceIds.length
       ? await this.services.find({ where: { id: In(serviceIds) } })
       : [];
-    const durationById = new Map(services.map((s) => [s.id, s.durationMinutes]));
-
-    let cursor = Date.now();
-    const inProgress = appts.find((a) => a.status === AppointmentStatus.InProgress);
-    if (inProgress?.actualStartAt) {
-      const dur = durationById.get(inProgress.serviceId) ?? 30;
-      cursor = Math.max(cursor, inProgress.actualStartAt.getTime() + dur * 60_000);
-    }
-
-    const queue = appts
-      .filter((a) => a.status === AppointmentStatus.Confirmed)
-      .map((a) => {
-        const estimatedStartAt = new Date(cursor);
-        const dur = durationById.get(a.serviceId) ?? 30;
-        cursor += dur * 60_000;
+    const nameById = new Map(services.map((sv) => [sv.id, sv.name]));
+    const byService = serviceIds
+      .map((sid) => {
+        const mine = done.filter((r) => r.service_id === sid);
+        const mins = mine
+          .map((r) => Number(r.service_min))
+          .filter((n) => Number.isFinite(n) && n >= 1 && n <= 240);
         return {
-          appointmentId: a.id,
-          personId: a.personId,
-          status: a.status,
-          estimatedStartAt: estimatedStartAt.toISOString(),
+          serviceName: nameById.get(sid) ?? 'Servicio',
+          count: mine.length,
+          avgServiceMinutes: avg(mins),
         };
-      });
+      })
+      .sort((a, b) => b.count - a.count);
 
-    return { staffId, generatedAt: new Date().toISOString(), queue };
+    return {
+      days: range,
+      servedCount: done.length,
+      noShowCount: rows.filter((r) => (r.status as AppointmentStatus) === AppointmentStatus.NoShow)
+        .length,
+      walkInCount: done.filter((r) => (r.created_via as CreatedVia) === CreatedVia.WalkIn).length,
+      avgWaitMinutes: avg(waits),
+      maxWaitMinutes: waits.length ? Math.round(Math.max(...waits)) : 0,
+      avgServiceMinutes: avg(serviceMins),
+      byHour,
+      peakHours,
+      byService,
+    };
   }
 
-  private async emitWaitingRoom(tenantId: string, staffId: string): Promise<void> {
-    const payload = await this.computeWaitingRoom(tenantId, staffId);
-    this.waitingRoom.emitQueueUpdate(payload);
+  private async emitWaitingRoom(
+    tenantId: string,
+    staffId: string,
+    comercioId?: string,
+  ): Promise<void> {
+    const membership = comercioId
+      ? await this.comercios.getActiveMembership(tenantId, comercioId).catch(() => null)
+      : null;
+    const room = await this.computeWaitingRoom(tenantId, staffId, membership?.id);
+    // La sala del socket es anónima: cualquiera que conozca el staffId (sale en la API
+    // pública) puede unirse. Por eso solo viaja la vista pública, SIN `pending` (quién
+    // se anotó y espera aprobación). El panel del profesional recarga por REST, que sí
+    // está autenticado, al recibir este evento.
+    this.waitingRoom.emitRoomUpdate({ staffId, room: { ...room, pending: [] } });
+    // Avisos push de avance ("estás segundo"). Nunca debe frenar ni romper la acción que
+    // disparó el cambio, por eso va suelto y con su propio manejo de errores.
+    void this.notifier
+      .notifyProgress(room)
+      .catch((err) => this.logger.warn(`Push de avance falló: ${String(err)}`));
+  }
+
+  private async staffName(staffId: string): Promise<string> {
+    return (await this.staff.findOne({ where: { id: staffId } }))?.displayName ?? 'El profesional';
   }
 }

@@ -11,7 +11,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { ScheduleRuleKind, TimeOffType } from '@/common/enums';
+import { AttendanceMode, ScheduleRuleKind, TimeOffType } from '@/common/enums';
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
 
@@ -34,6 +34,16 @@ export class CreateScheduleRuleDto {
   @IsOptional()
   @IsEnum(ScheduleRuleKind)
   kind?: ScheduleRuleKind;
+
+  @ApiPropertyOptional({
+    enum: AttendanceMode,
+    enumName: 'AttendanceMode',
+    description:
+      'Solo franjas de trabajo. appointment (default) = con turno; walk_in = por orden de llegada.',
+  })
+  @IsOptional()
+  @IsEnum(AttendanceMode)
+  attendanceMode?: AttendanceMode;
 
   /**
    * Servicios a los que aplica esta regla. Vacío/omitido = aplica a TODOS los
@@ -74,6 +84,11 @@ export class UpdateScheduleRuleDto {
   @IsOptional()
   @IsEnum(ScheduleRuleKind)
   kind?: ScheduleRuleKind;
+
+  @ApiPropertyOptional({ enum: AttendanceMode, enumName: 'AttendanceMode' })
+  @IsOptional()
+  @IsEnum(AttendanceMode)
+  attendanceMode?: AttendanceMode;
 
   @ApiPropertyOptional({
     type: [String],
@@ -158,6 +173,71 @@ export enum DayAvailabilityStatus {
   TimeOff = 'time_off',
   /** Hay horario de atención pero está completo (turnos/descansos lo ocupan). */
   Full = 'full',
+  /** Ese día se atiende por orden de llegada: no hay turnos, hay que anotarse en la sala. */
+  WalkIn = 'walk_in',
+}
+
+/** Franja horaria "HH:mm" (zona del comercio). */
+export class TimeWindowDto {
+  @ApiProperty({ example: '09:00' })
+  startTime!: string;
+
+  @ApiProperty({ example: '13:00' })
+  endTime!: string;
+}
+
+/** Franja semanal por orden de llegada. */
+export class WalkInWindowDto extends TimeWindowDto {
+  @ApiProperty({ example: 6, description: '0=domingo ... 6=sabado' })
+  dayOfWeek!: number;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: 'Servicios a los que aplica. Vacío = todos.',
+  })
+  serviceIds!: string[];
+}
+
+/** Cuándo y cómo se atiende por orden de llegada (para la sala y la página pública). */
+export class WalkInStatusDto {
+  @ApiProperty({ description: 'Atiende SIEMPRE por orden de llegada (sin turnos).' })
+  walkInOnly!: boolean;
+
+  @ApiProperty({
+    description:
+      'Tiene alguna franja por orden de llegada. Si es false, la sala funciona como siempre: ' +
+      'el profesional anota a quien llega y el self check-in no depende de horarios.',
+  })
+  hasSchedule!: boolean;
+
+  @ApiProperty({
+    description:
+      'Ahora mismo está en atención por orden de llegada. Con walkInOnly y sin franjas cargadas ' +
+      'se considera siempre abierto.',
+  })
+  openNow!: boolean;
+
+  @ApiProperty({
+    type: TimeWindowDto,
+    isArray: true,
+    description: 'Franjas de hoy (orden de llegada).',
+  })
+  todayWindows!: TimeWindowDto[];
+
+  @ApiPropertyOptional({
+    type: WalkInWindowDto,
+    nullable: true,
+    description: 'Próxima franja por orden de llegada (hoy más tarde u otro día), si hay.',
+  })
+  nextWindow!: WalkInWindowDto | null;
+
+  @ApiProperty({
+    type: WalkInWindowDto,
+    isArray: true,
+    description: 'Todas las franjas de la semana.',
+  })
+  windows!: WalkInWindowDto[];
 }
 
 /** Estado de disponibilidad de un día concreto, para mostrar el motivo al cliente. */
@@ -216,4 +296,11 @@ export class DayAvailabilityDto {
     description: 'true si hay al menos un slot libre (status=available).',
   })
   bookable!: boolean;
+
+  @ApiProperty({
+    type: TimeWindowDto,
+    isArray: true,
+    description: 'Franjas de ese día que se atienden por orden de llegada (vacío si no hay).',
+  })
+  walkInWindows!: TimeWindowDto[];
 }

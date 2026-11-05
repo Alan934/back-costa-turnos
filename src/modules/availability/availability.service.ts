@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, MoreThan, Repository } from 'typeorm';
 import { DateTime, Interval } from 'luxon';
-import { AppointmentStatus, ScheduleRuleKind, TimeOffType } from '@/common/enums';
+import { AppointmentStatus, AttendanceMode, ScheduleRuleKind, TimeOffType } from '@/common/enums';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { CatalogService } from '@/modules/catalog/catalog.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
@@ -19,7 +20,10 @@ import {
   CreateTimeOffDto,
   DayAvailabilityDto,
   DayAvailabilityStatus,
+  TimeWindowDto,
   UpdateScheduleRuleDto,
+  WalkInStatusDto,
+  WalkInWindowDto,
 } from './dto/availability.dto';
 
 // Estados de turno que ocupan un horario (no se pueden pisar).
@@ -135,6 +139,11 @@ export class AvailabilityService {
         startTime: dto.startTime,
         endTime: dto.endTime,
         kind: dto.kind ?? ScheduleRuleKind.Work,
+        // El modo solo tiene sentido en franjas de trabajo; en un descanso se ignora.
+        attendanceMode:
+          (dto.kind ?? ScheduleRuleKind.Work) === ScheduleRuleKind.Work
+            ? (dto.attendanceMode ?? AttendanceMode.Appointment)
+            : AttendanceMode.Appointment,
       }),
     );
     await this.saveRuleServices(rule.id, serviceIds);
@@ -164,6 +173,8 @@ export class AvailabilityService {
     rule.startTime = startTime;
     rule.endTime = endTime;
     if (dto.kind !== undefined) rule.kind = dto.kind;
+    if (dto.attendanceMode !== undefined) rule.attendanceMode = dto.attendanceMode;
+    if (rule.kind === ScheduleRuleKind.Break) rule.attendanceMode = AttendanceMode.Appointment;
     await this.scheduleRules.save(rule);
 
     // serviceIds presente => reemplaza el mapeo; omitido => no se toca.
@@ -278,6 +289,7 @@ export class AvailabilityService {
       const date = day.toISODate()!;
       const dow = day.weekday % 7; // 1=lunes..7=domingo -> 0=domingo..6=sabado
       const hasWork = (inputs.workByDay.get(dow)?.length ?? 0) > 0;
+      const walkInWindows = this.toWindows(inputs.walkInByDay.get(dow) ?? []);
       const counts = countsByDay.get(date) ?? { free: 0, total: 0 };
       const occupancyRatio = counts.total > 0 ? (counts.total - counts.free) / counts.total : 0;
 
@@ -291,6 +303,7 @@ export class AvailabilityService {
           totalSlots: counts.total,
           occupancyRatio,
           bookable: true,
+          walkInWindows: [],
         });
         continue;
       }
@@ -308,17 +321,23 @@ export class AvailabilityService {
           totalSlots: counts.total,
           occupancyRatio,
           bookable: false,
+          walkInWindows: [],
         });
       } else if (!hasWork) {
         days.push({
           date,
-          status: DayAvailabilityStatus.Closed,
+          // Sin turnos ese día: si hay franja por orden de llegada se informa como tal.
+          status:
+            walkInWindows.length > 0 || inputs.walkInOnly
+              ? DayAvailabilityStatus.WalkIn
+              : DayAvailabilityStatus.Closed,
           reason: null,
           timeOffType: null,
           freeSlots: 0,
           totalSlots: 0,
           occupancyRatio: 0,
           bookable: false,
+          walkInWindows: [],
         });
       } else {
         days.push({
@@ -330,10 +349,17 @@ export class AvailabilityService {
           totalSlots: counts.total,
           occupancyRatio: counts.total > 0 ? 1 : 0,
           bookable: false,
+          walkInWindows: [],
         });
       }
     }
 
+    // Las franjas por orden de llegada se informan en TODOS los días (también en los que
+    // además hay turnos): el cliente tiene que saber que ese tramo es solo por llegada.
+    for (const d of days) {
+      const dow = DateTime.fromISO(d.date, { zone: inputs.zone }).weekday % 7;
+      d.walkInWindows = this.toWindows(inputs.walkInByDay.get(dow) ?? []);
+    }
     return days;
   }
 
@@ -429,10 +455,17 @@ export class AvailabilityService {
         totalSlots,
         occupancyRatio,
         bookable: true,
+        walkInWindows: this.mergeWindows(a.walkInWindows, b.walkInWindows),
       };
     }
     const rank = (s: DayAvailabilityStatus): number =>
-      s === DayAvailabilityStatus.Full ? 3 : s === DayAvailabilityStatus.TimeOff ? 2 : 1;
+      s === DayAvailabilityStatus.Full
+        ? 4
+        : s === DayAvailabilityStatus.TimeOff
+          ? 3
+          : s === DayAvailabilityStatus.WalkIn
+            ? 2
+            : 1;
     const winner = rank(b.status) > rank(a.status) ? b : a;
     return {
       date: a.date,
@@ -443,7 +476,18 @@ export class AvailabilityService {
       totalSlots,
       occupancyRatio,
       bookable: false,
+      walkInWindows: this.mergeWindows(a.walkInWindows, b.walkInWindows),
     };
+  }
+
+  private mergeWindows(a: TimeWindowDto[], b: TimeWindowDto[]): TimeWindowDto[] {
+    const seen = new Set<string>();
+    return [...a, ...b].filter((w) => {
+      const key = `${w.startTime}-${w.endTime}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   /**
@@ -466,6 +510,10 @@ export class AvailabilityService {
     capacity: number;
     workByDay: Map<number, ScheduleRule[]>;
     breaksByDay: Map<number, ScheduleRule[]>;
+    /** Franjas por orden de llegada (aplicables a este servicio): no dan turnos, pero se informan. */
+    walkInByDay: Map<number, ScheduleRule[]>;
+    /** La membresía atiende siempre por orden de llegada (aunque no tenga franjas cargadas). */
+    walkInOnly: boolean;
     timeOffs: TimeOff[];
     busy: BusyInterval[];
     minBookingHours?: number;
@@ -509,13 +557,23 @@ export class AvailabilityService {
 
     const workByDay = new Map<number, ScheduleRule[]>();
     const breaksByDay = new Map<number, ScheduleRule[]>();
+    const walkInByDay = new Map<number, ScheduleRule[]>();
     for (const rule of rules) {
       const mapped = ruleServiceMap.get(rule.id);
       // Regla dirigida a servicios concretos que NO incluyen este: no aplica.
       // Para un descanso parcial significa que este servicio sigue reservable en
       // ese rango; para una franja de trabajo, que no oferta este servicio.
       if (mapped && mapped.length > 0 && !mapped.includes(serviceId)) continue;
-      if (rule.kind === ScheduleRuleKind.Work) {
+      if (rule.kind === ScheduleRuleKind.Work && this.isWalkInRule(rule, membership)) {
+        // Por orden de llegada: no genera horarios reservables. Además actúa como un bloqueo,
+        // así una franja "con turno" que se solape con ella no ofrece turnos en ese tramo.
+        const walkIns = walkInByDay.get(rule.dayOfWeek) ?? [];
+        walkIns.push(rule);
+        walkInByDay.set(rule.dayOfWeek, walkIns);
+        const list = breaksByDay.get(rule.dayOfWeek) ?? [];
+        list.push(rule);
+        breaksByDay.set(rule.dayOfWeek, list);
+      } else if (rule.kind === ScheduleRuleKind.Work) {
         const list = workByDay.get(rule.dayOfWeek) ?? [];
         list.push(rule);
         workByDay.set(rule.dayOfWeek, list);
@@ -565,11 +623,111 @@ export class AvailabilityService {
       capacity: service.capacity,
       workByDay,
       breaksByDay,
+      walkInByDay,
+      walkInOnly: membership.walkInOnly,
       timeOffs,
       busy,
       minBookingHours: membership.minBookingHours,
       maxBookingDays: membership.maxBookingDays,
     };
+  }
+
+  // ---- Orden de llegada ----
+
+  /** ¿Esta franja de trabajo se atiende por orden de llegada? (propia o "siempre" de la membresía) */
+  private isWalkInRule(rule: ScheduleRule, membership: Pick<Membership, 'walkInOnly'>): boolean {
+    return membership.walkInOnly || rule.attendanceMode === AttendanceMode.WalkIn;
+  }
+
+  private toWindows(rules: ScheduleRule[]): TimeWindowDto[] {
+    return rules
+      .map((r) => ({ startTime: r.startTime.slice(0, 5), endTime: r.endTime.slice(0, 5) }))
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  /**
+   * Cuándo y cómo atiende por orden de llegada esta membresía. Con `serviceId` solo cuentan las
+   * franjas que aplican a ese servicio (una franja puede estar dirigida a servicios concretos).
+   * Todo en la zona horaria del comercio.
+   *
+   * `openNow` con `walkInOnly` y sin ninguna franja cargada es true: quien atiende siempre por
+   * orden de llegada y no definió horarios no tiene restricción de horario.
+   */
+  async getWalkInSchedule(membership: Membership, serviceId?: string): Promise<WalkInStatusDto> {
+    const comercio = await this.comercios.getComercio(membership.comercioId);
+    const rules = await this.scheduleRules.find({
+      where: { membershipId: membership.id, kind: ScheduleRuleKind.Work },
+    });
+    const effective = rules.filter((r) => this.isWalkInRule(r, membership));
+    const serviceMap = await this.serviceIdsByRule(effective.map((r) => r.id));
+
+    const windows: WalkInWindowDto[] = effective
+      .map((r) => ({
+        dayOfWeek: r.dayOfWeek,
+        startTime: r.startTime.slice(0, 5),
+        endTime: r.endTime.slice(0, 5),
+        serviceIds: serviceMap.get(r.id) ?? [],
+      }))
+      .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
+    const applies = (w: WalkInWindowDto) =>
+      !serviceId || w.serviceIds.length === 0 || w.serviceIds.includes(serviceId);
+    const relevant = windows.filter(applies);
+
+    const now = DateTime.now().setZone(comercio.timezone);
+    const dow = now.weekday % 7;
+    const hhmm = now.toFormat('HH:mm');
+    const todayWindows = relevant
+      .filter((w) => w.dayOfWeek === dow)
+      .map(({ startTime, endTime }) => ({ startTime, endTime }));
+
+    let nextWindow: WalkInWindowDto | null = null;
+    for (let offset = 0; offset <= 7 && !nextWindow; offset++) {
+      const d = (dow + offset) % 7;
+      nextWindow =
+        relevant.find((w) => w.dayOfWeek === d && (offset > 0 || w.startTime > hhmm)) ?? null;
+    }
+
+    const openNow =
+      membership.walkInOnly && windows.length === 0
+        ? true
+        : todayWindows.some((w) => w.startTime <= hhmm && hhmm < w.endTime);
+
+    return {
+      walkInOnly: membership.walkInOnly,
+      hasSchedule: membership.walkInOnly || windows.length > 0,
+      openNow,
+      todayWindows,
+      nextWindow,
+      windows,
+    };
+  }
+
+  /**
+   * ¿`at` cae en una franja por orden de llegada de esta membresía para este servicio? Lo usa la
+   * reserva pública para no aceptar turnos en un tramo que se atiende solo por llegada (aunque
+   * alguien llame a la API directo, saltándose lo que muestra la pantalla).
+   */
+  async isWalkInAt(membership: Membership, serviceId: string, at: Date): Promise<boolean> {
+    if (membership.walkInOnly) return true;
+    const comercio = await this.comercios.getComercio(membership.comercioId);
+    const local = DateTime.fromJSDate(at).setZone(comercio.timezone);
+    const dow = local.weekday % 7;
+    const hhmm = local.toFormat('HH:mm');
+    const rules = await this.scheduleRules.find({
+      where: {
+        membershipId: membership.id,
+        kind: ScheduleRuleKind.Work,
+        attendanceMode: AttendanceMode.WalkIn,
+        dayOfWeek: dow,
+      },
+    });
+    if (rules.length === 0) return false;
+    const serviceMap = await this.serviceIdsByRule(rules.map((r) => r.id));
+    return rules.some((r) => {
+      const mapped = serviceMap.get(r.id) ?? [];
+      const applies = mapped.length === 0 || mapped.includes(serviceId);
+      return applies && r.startTime.slice(0, 5) <= hhmm && hhmm < r.endTime.slice(0, 5);
+    });
   }
 
   // ---- Núcleo de cálculo de slots (compartido) ----

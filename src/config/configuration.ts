@@ -85,6 +85,14 @@ export interface MailConfig {
   password: string;
 }
 
+export interface PushConfig {
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+  /** true solo si hay par de claves VAPID: sin ellas el push queda deshabilitado (no rompe nada). */
+  enabled: boolean;
+}
+
 export interface WhatsappConfig {
   apiUrl: string;
   apiToken: string;
@@ -191,6 +199,13 @@ export default () => ({
     user: process.env.MAIL_USER ?? '',
     password: process.env.MAIL_PASSWORD ?? '',
   } satisfies MailConfig,
+
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY ?? '',
+    privateKey: process.env.VAPID_PRIVATE_KEY ?? '',
+    subject: process.env.VAPID_SUBJECT ?? 'mailto:soporte@turnerito.app',
+    enabled: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+  } satisfies PushConfig,
 
   whatsapp: {
     apiUrl: process.env.WHATSAPP_API_URL ?? '',

@@ -1,3 +1,4 @@
+import { WalkInWindowDto } from '@/modules/availability/dto/availability.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service, ServicePricing } from '@/modules/catalog/entities/service.entity';
 
@@ -41,6 +42,23 @@ export class PublicProfessionalDto {
       'false = el turno sin seña queda firme.',
   })
   allowProvisionalBookings!: boolean;
+
+  @ApiProperty({
+    type: Boolean,
+    description:
+      'Atiende SIEMPRE por orden de llegada: no hay turnos con horario. El front reemplaza la ' +
+      'reserva por "Anotarse en la sala de espera".',
+  })
+  walkInOnly!: boolean;
+
+  @ApiProperty({
+    type: WalkInWindowDto,
+    isArray: true,
+    description:
+      'Franjas de la semana que se atienden por orden de llegada (vacío si no hay). Se muestran ' +
+      'como "Sáb 09:00–13:00 por orden de llegada".',
+  })
+  walkInSchedule!: WalkInWindowDto[];
 }
 
 /** Respuesta de GET /r/:slug: la página pública del COMERCIO. */

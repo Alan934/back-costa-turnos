@@ -27,6 +27,7 @@ import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PushModule } from './modules/push/push.module';
 import { RafflesModule } from './modules/raffles/raffles.module';
 import { FilesModule } from './modules/files/files.module';
 import { LegalModule } from './modules/legal/legal.module';
@@ -102,6 +103,7 @@ import { MeModule } from './modules/me/me.module';
     PaymentsModule,
     SubscriptionsModule,
     NotificationsModule,
+    PushModule,
     RafflesModule,
     FilesModule,
     LegalModule,

@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import * as argon2 from 'argon2';
-import { MembershipStatus } from '@/common/enums';
+import { MembershipStatus, WaitingRoomStatus } from '@/common/enums';
 import { AppConfig } from '@/config/configuration';
 import { AccountsService } from '@/modules/identity/accounts.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
@@ -308,6 +308,11 @@ export class ComerciosService {
       minBookingHours?: number;
       maxBookingDays?: number;
       allowProvisionalBookings?: boolean;
+      walkInOnly?: boolean;
+      waitingRoomEnabled?: boolean;
+      waitingRoomSelfCheckIn?: boolean;
+      waitingRoomStatus?: WaitingRoomStatus;
+      waitingRoomNote?: string | null;
     },
   ): Promise<Membership> {
     const membership = await this.getMembershipById(membershipId);
@@ -323,6 +328,22 @@ export class ComerciosService {
     }
     if (dto.allowProvisionalBookings !== undefined) {
       membership.allowProvisionalBookings = dto.allowProvisionalBookings;
+    }
+    if (dto.walkInOnly !== undefined) {
+      membership.walkInOnly = dto.walkInOnly;
+    }
+    if (dto.waitingRoomEnabled !== undefined) {
+      membership.waitingRoomEnabled = dto.waitingRoomEnabled;
+    }
+    if (dto.waitingRoomSelfCheckIn !== undefined) {
+      membership.waitingRoomSelfCheckIn = dto.waitingRoomSelfCheckIn;
+    }
+    if (dto.waitingRoomStatus !== undefined) {
+      membership.waitingRoomStatus = dto.waitingRoomStatus;
+    }
+    if (dto.waitingRoomNote !== undefined) {
+      // "" o null => limpia la nota de la pantalla pública.
+      membership.waitingRoomNote = dto.waitingRoomNote ? dto.waitingRoomNote : null;
     }
     return this.memberships.save(membership);
   }

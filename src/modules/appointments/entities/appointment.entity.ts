@@ -112,6 +112,77 @@ export class Appointment extends BaseEntity {
   @Column({ name: 'actual_start_at', type: 'timestamptz', nullable: true })
   actualStartAt!: Date | null;
 
+  /**
+   * Cuando la persona LLEGO al local. NULL = todavia no aparecio. La cola de la
+   * sala de espera muestra solo a los presentes, para que la posicion y el ETA
+   * no cuenten turnos agendados cuyo cliente aun no llego.
+   */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'checked_in_at', type: 'timestamptz', nullable: true })
+  checkedInAt!: Date | null;
+
+  /**
+   * Numero de turno del dia para esta agenda (staff), asignado al hacer check-in.
+   * Se persiste en vez de derivarse de la posicion para que no se le mueva el
+   * numero al cliente cuando alguien sale de la cola.
+   */
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  @Column({ name: 'ticket_number', type: 'integer', nullable: true })
+  ticketNumber!: number | null;
+
+  /**
+   * Clave de orden de la cola de la sala (ms epoch de la llegada por defecto). El
+   * profesional puede reordenar: subir/bajar reescribe estos valores y "al final" le
+   * da el máximo. NULL = no está en la sala.
+   */
+  @ApiPropertyOptional({ type: Number, nullable: true })
+  @Column({ name: 'queue_rank', type: 'double precision', nullable: true })
+  queueRank!: number | null;
+
+  /** Pasa al frente de la cola (urgencia). Se ordena antes que el resto. */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'is_priority', type: 'boolean', default: false })
+  isPriority!: boolean;
+
+  /** Última vez que el profesional lo llamó ("pasá, te toca"). */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'called_at', type: 'timestamptz', nullable: true })
+  calledAt!: Date | null;
+
+  @ApiProperty({ type: Number })
+  @Column({ name: 'call_count', type: 'integer', default: 0 })
+  callCount!: number;
+
+  /** "Me voy y vuelvo": hasta cuándo está ausente. Mientras tanto se lo saltea. */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'away_until', type: 'timestamptz', nullable: true })
+  awayUntil!: Date | null;
+
+  /** Cuántas veces se ausentó hoy: tope para que no se use de excusa para no esperar. */
+  @ApiProperty({ type: Number })
+  @Column({ name: 'away_count', type: 'integer', default: 0 })
+  awayCount!: number;
+
+  /** Fin real de la atención. Con `actualStartAt` mide la duración real del servicio. */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
+  completedAt!: Date | null;
+
+  @Column({ name: 'notified_second_at', type: 'timestamptz', nullable: true })
+  notifiedSecondAt!: Date | null;
+
+  @Column({ name: 'notified_next_at', type: 'timestamptz', nullable: true })
+  notifiedNextAt!: Date | null;
+
+  /**
+   * Token opaco del link personal del cliente (/sala/t/:token). Se genera al
+   * hacer check-in. No se usa el id del turno para no exponer ids internos en
+   * una URL que se comparte por WhatsApp o queda en el historial del navegador.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Column({ name: 'public_token', type: 'text', nullable: true })
+  publicToken!: string | null;
+
   @ApiProperty({ enum: CreatedVia, enumName: 'CreatedVia' })
   @Column({
     name: 'created_via',

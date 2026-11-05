@@ -7,6 +7,7 @@ import { AvailabilityModule } from '@/modules/availability/availability.module';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from '@/modules/payments/payments.module';
+import { PushModule } from '@/modules/push/push.module';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { ServiceCombinationRule } from '@/modules/catalog/entities/service-combination-rule.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
@@ -19,6 +20,8 @@ import { PendingBooking } from './entities/pending-booking.entity';
 import { AppointmentsService } from './appointments.service';
 import { AppointmentsController } from './appointments.controller';
 import { PublicBookingController } from './public-booking.controller';
+import { WaitingSpotController } from './waiting-spot.controller';
+import { WaitingRoomNotifier } from './waiting-room.notifier';
 import { WaitingRoomGateway } from './waiting-room.gateway';
 import { AppointmentsJobs } from './appointments.jobs';
 
@@ -42,9 +45,10 @@ import { AppointmentsJobs } from './appointments.jobs';
     NotificationsModule,
     SubscriptionsModule,
     PaymentsModule,
+    PushModule,
   ],
-  controllers: [AppointmentsController, PublicBookingController],
-  providers: [AppointmentsService, WaitingRoomGateway, AppointmentsJobs],
+  controllers: [AppointmentsController, PublicBookingController, WaitingSpotController],
+  providers: [AppointmentsService, WaitingRoomGateway, WaitingRoomNotifier, AppointmentsJobs],
   exports: [AppointmentsService],
 })
 export class AppointmentsModule {}
