@@ -5,6 +5,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MercadoPagoConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Payment } from './entities/payment.entity';
+import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { AppointmentAddon } from '@/modules/appointments/entities/appointment-addon.entity';
+import { Service } from '@/modules/catalog/entities/service.entity';
+import { AuditLog } from '@/modules/legal/entities/audit-log.entity';
+import { ChargeService } from './charge.service';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { MpOAuthController } from './mp-oauth.controller';
@@ -14,10 +19,21 @@ import { MercadoPagoStubProvider } from './providers/mercadopago-stub.provider';
 import { MercadoPagoOAuthService } from './providers/mercadopago-oauth.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Professional]), JwtModule.register({})],
+  imports: [
+    TypeOrmModule.forFeature([
+      Payment,
+      Professional,
+      Appointment,
+      AppointmentAddon,
+      Service,
+      AuditLog,
+    ]),
+    JwtModule.register({}),
+  ],
   controllers: [PaymentsController, MpOAuthController],
   providers: [
     PaymentsService,
+    ChargeService,
     MercadoPagoOAuthService,
     MercadoPagoProvider,
     MercadoPagoStubProvider,

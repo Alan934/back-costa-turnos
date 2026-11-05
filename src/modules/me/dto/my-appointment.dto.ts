@@ -58,4 +58,12 @@ export class MyAppointmentDto {
   staffName!: string;
   @ApiProperty({ type: MyAppointmentBusinessDto })
   business!: MyAppointmentBusinessDto;
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Token del link personal de la sala de espera (/sala/t/{token}). Existe solo desde que la ' +
+      'persona hizo check-in de llegada; null = todavía no está en la fila.',
+  })
+  publicToken!: string | null;
 }

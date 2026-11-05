@@ -50,6 +50,11 @@ export const envValidationSchema = Joi.object({
   MP_MARKETPLACE_FEE_PERCENT: Joi.number().min(0).max(100).default(0),
   MP_FRONT_RETURN_URL: Joi.string().uri().optional(),
 
+  // Web Push (VAPID). Opcional: sin claves el push queda deshabilitado.
+  VAPID_PUBLIC_KEY: Joi.string().allow('').default(''),
+  VAPID_PRIVATE_KEY: Joi.string().allow('').default(''),
+  VAPID_SUBJECT: Joi.string().default('mailto:soporte@turnerito.app'),
+
   // Suscripcion (trial / gracia / precio)
   SUBSCRIPTION_TRIAL_DAYS: Joi.number().default(15),
   SUBSCRIPTION_GRACE_DAYS: Joi.number().default(3),

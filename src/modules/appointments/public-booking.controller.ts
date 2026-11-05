@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -37,6 +38,7 @@ import {
   PublicBookDto,
   PublicBookWithDepositDto,
 } from './dto/appointment.dto';
+import { SelfCheckInDto, SelfCheckInResultDto, WaitingRoomDto } from './dto/waiting-room.dto';
 
 /**
  * Página pública de reservas por COMERCIO: /r/:slug. No requiere auth; el slug
@@ -395,6 +397,97 @@ export class PublicBookingController {
   private async resolveMembership(slug: string, membershipId: string): Promise<Membership> {
     const comercio = await this.comercios.getComercioBySlug(slug);
     return this.comercios.getActiveMembershipInComercio(comercio.id, membershipId);
+  }
+
+  // ---- Sala de espera pública (la pantalla del QR colgado en el local) ----
+
+  /**
+   * La sala solo existe públicamente si el profesional la publicó. Si no, 404:
+   * no se filtra ni siquiera que la agenda existe.
+   */
+  private assertWaitingRoomPublished(membership: Membership): Membership {
+    if (!membership.waitingRoomEnabled) {
+      throw new NotFoundException('Este profesional no publica su sala de espera');
+    }
+    return membership;
+  }
+
+  /**
+   * Cola en vivo, sin auth: cualquiera que escanee el QR ve cuánta gente hay y
+   * cuánto falta. Solo nombre de pila y número de turno; nunca datos de contacto.
+   * `pending` va vacío: quién está esperando aprobación es cosa del profesional.
+   */
+  @ApiOperation({ summary: 'Sala de espera pública de un profesional del comercio' })
+  @ApiResponse({ status: 200, type: WaitingRoomDto })
+  @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
+  @Get('professionals/:membershipId/sala')
+  async waitingRoom(
+    @Param('slug') slug: string,
+    @Param('membershipId') membershipId: string,
+  ): Promise<WaitingRoomDto> {
+    const membership = this.assertWaitingRoomPublished(
+      await this.resolveMembership(slug, membershipId),
+    );
+    const room = await this.appointments.computeWaitingRoomForMembership(membership);
+    return { ...room, pending: [] };
+  }
+
+  @ApiOperation({
+    summary: 'Anotarse en la sala de espera escaneando el QR',
+    description:
+      'Crea la entrada en estado pendiente: el profesional la acepta desde su panel. Devuelve el ' +
+      'token del link personal (/sala/t/{token}) con el que el cliente sigue su lugar en la fila.',
+  })
+  @ApiResponse({ status: 201, type: SelfCheckInResultDto })
+  @ApiResponse({ status: 403, description: 'El local no permite anotarse desde el celular' })
+  @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @Post('professionals/:membershipId/sala/check-in')
+  async selfCheckIn(
+    @Param('slug') slug: string,
+    @Param('membershipId') membershipId: string,
+    @Body() dto: SelfCheckInDto,
+    @CurrentAccount('sub') accountId?: string,
+  ): Promise<SelfCheckInResultDto> {
+    const membership = this.assertWaitingRoomPublished(
+      await this.resolveMembership(slug, membershipId),
+    );
+    await this.assertBookable(membership.professionalId);
+    return this.appointments.selfCheckIn(membership, dto, accountId);
+  }
+
+  @ApiOperation({
+    summary: 'Sala de espera (comercio-de-uno): auto-resuelve el único profesional',
+  })
+  @ApiResponse({ status: 200, type: WaitingRoomDto })
+  @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
+  @Get('sala')
+  async waitingRoomFlat(@Param('slug') slug: string): Promise<WaitingRoomDto> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const membership = this.assertWaitingRoomPublished(
+      await this.singleMembershipOrThrow(comercio.id),
+    );
+    const room = await this.appointments.computeWaitingRoomForMembership(membership);
+    return { ...room, pending: [] };
+  }
+
+  @ApiOperation({ summary: 'Anotarse (comercio-de-uno): auto-resuelve el único profesional' })
+  @ApiResponse({ status: 201, type: SelfCheckInResultDto })
+  @ApiResponse({ status: 403, description: 'El local no permite anotarse desde el celular' })
+  @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @Post('sala/check-in')
+  async selfCheckInFlat(
+    @Param('slug') slug: string,
+    @Body() dto: SelfCheckInDto,
+    @CurrentAccount('sub') accountId?: string,
+  ): Promise<SelfCheckInResultDto> {
+    const comercio = await this.comercios.getComercioBySlug(slug);
+    const membership = this.assertWaitingRoomPublished(
+      await this.singleMembershipOrThrow(comercio.id),
+    );
+    await this.assertBookable(membership.professionalId);
+    return this.appointments.selfCheckIn(membership, dto, accountId);
   }
 
   // ---- Compat comercio-de-uno: rutas planas (sin membershipId) ----

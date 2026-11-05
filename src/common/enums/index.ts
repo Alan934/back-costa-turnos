@@ -98,6 +98,18 @@ export enum CancellationReason {
 export enum CreatedVia {
   ClientSelf = 'client_self',
   Professional = 'professional',
+  /** Cliente que llega sin turno y entra a la sala de espera (lo carga el profesional o el propio cliente por QR). */
+  WalkIn = 'walk_in',
+}
+
+/** Estado operativo de la sala de espera de un profesional en un comercio. */
+export enum WaitingRoomStatus {
+  /** Atendiendo con normalidad. */
+  Open = 'open',
+  /** Pausa momentánea ("vuelvo en 15"): la cola se mantiene, no se llama a nadie. */
+  Paused = 'paused',
+  /** No se atiende: la pantalla pública lo informa y el self check-in queda deshabilitado. */
+  Closed = 'closed',
 }
 
 export enum PaymentType {

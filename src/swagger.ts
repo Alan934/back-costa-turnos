@@ -49,7 +49,7 @@ export const swaggerUiOptions: SwaggerCustomOptions = {
  * Prefijos de rutas VERSION_NEUTRAL (sin /v1). Todo lo demas es version 1 y se
  * sirve bajo /v1.
  */
-const NEUTRAL_PREFIXES = ['/auth', '/health', '/r/', '/payments/mp/oauth'];
+const NEUTRAL_PREFIXES = ['/auth', '/health', '/r/', '/sala/', '/push', '/payments/mp/oauth'];
 
 function isNeutralPath(path: string): boolean {
   return NEUTRAL_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`) || path.startsWith(p));
