@@ -31,6 +31,8 @@ export interface WebhookResult {
   status: string;
   /** id del pago en el proveedor. */
   providerPaymentId: string;
+  /** Monto acreditado (centavos) según el proveedor; null si no lo informa. */
+  amountCents?: number | null;
 }
 
 /**

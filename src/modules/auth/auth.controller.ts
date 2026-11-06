@@ -11,19 +11,25 @@ import {
   VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '@/common/decorators/public.decorator';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { AuthenticatedRequest } from '@/common/types/request-user';
 import { VerificationPurpose } from '@/common/enums';
 import { AppConfig } from '@/config/configuration';
 import { AuthService, GoogleProfileInput } from './auth.service';
-import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+import {
+  GoogleOAuthGuard,
+  clearGoogleStateCookie,
+  isValidGoogleState,
+} from './guards/google-oauth.guard';
 import {
   AuthMeDto,
   AuthTokensDto,
   ClaimAccountDto,
+  GoogleExchangeDto,
   LoginDto,
   RefreshDto,
   RegisterComercialDto,
@@ -46,6 +52,7 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthTokensDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
@@ -58,6 +65,7 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthTokensDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos o slug en uso' })
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('register-professional')
   registerProfessional(@Body() dto: RegisterProfessionalDto) {
     return this.auth.registerProfessional(dto);
@@ -73,6 +81,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @ApiResponse({ status: 409, description: 'El slug ya está en uso' })
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('register-comercial')
   registerComercial(@Body() dto: RegisterComercialDto) {
     return this.auth.registerComercial(dto);
@@ -130,20 +139,46 @@ export class AuthController {
   @ApiOperation({ summary: 'Callback de login con Google' })
   @ApiResponse({
     status: 302,
-    description: 'Redirige al frontend con access_token y refresh_token.',
+    description:
+      'Redirige al frontend con un código de un solo uso (?code=) para canjear por tokens en ' +
+      'POST /auth/google/exchange. Si falla, redirige con ?error=.',
   })
   @Public()
   @UseGuards(GoogleOAuthGuard)
   @Get('google/callback')
   async googleCallback(@Req() req: AuthenticatedRequest, @Res() res: Response): Promise<void> {
-    const profile = req.user as unknown as GoogleProfileInput;
-    const tokens = await this.auth.validateGoogleUser(profile);
     const appConfig = this.config.getOrThrow<AppConfig>('app');
-    // Redirige al FRONTEND (FRONT_URL) con los tokens en el query.
-    const url = new URL('/auth/callback', appConfig.frontUrl);
-    url.searchParams.set('access_token', tokens.accessToken);
-    url.searchParams.set('refresh_token', tokens.refreshToken);
-    res.redirect(url.toString());
+    const target = new URL('/auth/callback', appConfig.frontUrl);
+
+    // El state debe coincidir con la cookie del navegador que inició el login (anti CSRF).
+    const stateOk = isValidGoogleState(req);
+    clearGoogleStateCookie(res);
+    const profile = req.user as unknown as GoogleProfileInput | undefined;
+    if (!stateOk || !profile?.googleId) {
+      target.searchParams.set('error', 'google');
+      res.redirect(target.toString());
+      return;
+    }
+
+    try {
+      const tokens = await this.auth.validateGoogleUser(profile);
+      // Los tokens NO van en la URL: solo un código opaco de un solo uso (60s).
+      target.searchParams.set('code', await this.auth.createGoogleExchangeCode(tokens));
+    } catch {
+      target.searchParams.set('error', 'google');
+    }
+    res.redirect(target.toString());
+  }
+
+  @ApiOperation({ summary: 'Canjear el código del login con Google por tokens' })
+  @ApiResponse({ status: 200, type: AuthTokensDto })
+  @ApiResponse({ status: 401, description: 'Código inválido, usado o vencido' })
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('google/exchange')
+  googleExchange(@Body() dto: GoogleExchangeDto) {
+    return this.auth.exchangeGoogleCode(dto.code);
   }
 
   // ---- Reclamo / verificacion / reset ----
@@ -155,6 +190,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('request-claim-code')
   async requestClaimCode(@Body() dto: RequestCodeDto): Promise<{ ok: true }> {
     await this.auth.requestCode(dto.email, VerificationPurpose.AccountClaim);
@@ -166,6 +202,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('claim')
   claim(@Body() dto: ClaimAccountDto) {
     return this.auth.claimAccount(dto);
@@ -179,6 +216,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('request-email-code')
   async requestEmailCode(@Body() dto: RequestCodeDto): Promise<{ ok: true }> {
     await this.auth.requestCode(dto.email, VerificationPurpose.EmailVerify);
@@ -190,6 +228,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('verify-email')
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ ok: true }> {
     await this.auth.verifyEmail(dto);
@@ -204,6 +243,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('request-password-reset')
   async requestPasswordReset(@Body() dto: RequestCodeDto): Promise<{ ok: true }> {
     await this.auth.requestCode(dto.email, VerificationPurpose.PasswordReset);
@@ -218,6 +258,7 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('reset-password')
   async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ ok: true }> {
     await this.auth.resetPassword(dto);

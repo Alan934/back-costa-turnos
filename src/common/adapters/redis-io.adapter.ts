@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { ServerOptions } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
-import { RedisConfig } from '@/config/configuration';
+import { AppConfig, RedisConfig } from '@/config/configuration';
 
 /**
  * Adapter de Socket.IO con backend Redis para que la sala de espera funcione
@@ -32,7 +32,12 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   createIOServer(port: number, options?: ServerOptions): any {
-    const server = super.createIOServer(port, options);
+    // CORS del WebSocket con la MISMA lista que la API (CORS_ORIGINS), no '*'.
+    const { corsOrigins } = this.app.get(ConfigService).getOrThrow<AppConfig>('app');
+    const server = super.createIOServer(port, {
+      ...options,
+      cors: { origin: corsOrigins, credentials: true },
+    });
     if (this.adapterConstructor) {
       server.adapter(this.adapterConstructor);
     }

@@ -104,6 +104,15 @@ export class SubscriptionsService {
     const result = await this.provider.parseWebhook(payload);
     if (!result?.externalReference?.startsWith(SUBSCRIPTION_REF_PREFIX)) return;
     const subscriptionId = result.externalReference.slice(SUBSCRIPTION_REF_PREFIX.length);
+    if (result.paid && result.amountCents != null) {
+      const sub = await this.subscriptions.findOne({ where: { id: subscriptionId } });
+      if (sub && result.amountCents < sub.amountCents) {
+        this.logger.warn(
+          `Webhook MP: pago ${result.providerPaymentId} por ${result.amountCents} < ${sub.amountCents} (suscripción ${sub.id}); no se acredita.`,
+        );
+        return;
+      }
+    }
     await this.recordPayment(
       subscriptionId,
       undefined,

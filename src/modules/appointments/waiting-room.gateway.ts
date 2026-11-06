@@ -29,7 +29,8 @@ function room(staffId: string): string {
  * Los nombres de evento y el namespace son parte del contrato con el front
  * (ver `src/lib/realtime/events.ts`): `waiting-room:join` / `waiting-room:update`.
  */
-@WebSocketGateway({ namespace: '/waiting-room', cors: { origin: '*' } })
+// CORS: lo fija RedisIoAdapter con CORS_ORIGINS (no se declara acá para no abrirlo a '*').
+@WebSocketGateway({ namespace: '/waiting-room' })
 export class WaitingRoomGateway implements OnGatewayConnection {
   private readonly logger = new Logger(WaitingRoomGateway.name);
 

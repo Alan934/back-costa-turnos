@@ -1,9 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import type Redis from 'ioredis';
+import { REDIS_CLIENT } from '@/redis/redis.module';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as argon2 from 'argon2';
@@ -30,6 +35,8 @@ import {
   VerifyEmailDto,
 } from './dto/auth.dto';
 
+const GOOGLE_CODE_PREFIX = 'auth:google:code:';
+
 export interface GoogleProfileInput {
   googleId: string;
   email: string;
@@ -50,6 +57,8 @@ export class AuthService {
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Staff)
     private readonly staff: Repository<Staff>,
+    @Inject(REDIS_CLIENT)
+    private readonly redis: Redis,
   ) {}
 
   /** Arma el payload del JWT resolviendo roles y tenant del account. */
@@ -129,11 +138,44 @@ export class AuthService {
     }
   }
 
-  async register(dto: RegisterDto): Promise<IssuedTokens> {
-    const existing = await this.accounts.findByEmail(dto.email);
-    if (existing && existing.isClaimed) {
+  /**
+   * Antes de registrar sobre un email que YA tiene cuenta:
+   *  - reclamada (tiene dueño/password): se rechaza.
+   *  - no reclamada (la creó un tercero, p. ej. un profesional al cargar un cliente): solo
+   *    se puede tomar probando que se controla el email, con el código que se manda por mail.
+   *    Sin esta prueba, cualquiera podía registrarse con el email de otra persona y quedarse
+   *    con su cuenta (y su historial de turnos) antes de que la reclame.
+   * Devuelve la cuenta existente (si había) para reutilizarla.
+   */
+  private async assertCanRegisterOver(
+    email: string,
+    verificationCode?: string,
+  ): Promise<Account | null> {
+    const existing = await this.accounts.findByEmail(email);
+    if (!existing) return null;
+    if (existing.isClaimed) {
       throw new BadRequestException('Ya existe una cuenta con ese email');
     }
+    if (!verificationCode) {
+      // Manda el código (con cooldown) y avisa al front que lo pida.
+      await this.requestCode(email, VerificationPurpose.AccountClaim);
+      throw new ConflictException({
+        message:
+          'Ese email ya tiene una cuenta pendiente de activar. Te enviamos un código para confirmar que es tuyo.',
+        error: 'claim_required',
+      });
+    }
+    const token = await this.verification.consume(
+      email,
+      VerificationPurpose.AccountClaim,
+      verificationCode,
+    );
+    if (!token) throw new BadRequestException('Codigo invalido o vencido');
+    return existing;
+  }
+
+  async register(dto: RegisterDto): Promise<IssuedTokens> {
+    const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
 
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
@@ -141,6 +183,7 @@ export class AuthService {
       // Cuenta no reclamada: la reclama seteando password.
       existing.passwordHash = passwordHash;
       existing.isClaimed = true;
+      existing.emailVerifiedAt ??= new Date(); // probó el código enviado a ese email
       account = await this.accounts.save(existing);
     } else {
       account = await this.accounts.create({
@@ -165,15 +208,13 @@ export class AuthService {
    * El token resultante ya trae rol professional y su comercio personal.
    */
   async registerProfessional(dto: RegisterProfessionalDto): Promise<IssuedTokens> {
-    const existing = await this.accounts.findByEmail(dto.email);
-    if (existing && existing.isClaimed) {
-      throw new BadRequestException('Ya existe una cuenta con ese email');
-    }
+    const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
     if (existing) {
       existing.passwordHash = passwordHash;
       existing.isClaimed = true;
+      existing.emailVerifiedAt ??= new Date(); // probó el código enviado a ese email
       account = await this.accounts.save(existing);
     } else {
       account = await this.accounts.create({
@@ -205,6 +246,7 @@ export class AuthService {
    * rol `comercial` y el `comercioIds` del comercio recién creado.
    */
   async registerComercial(dto: RegisterComercialDto): Promise<IssuedTokens> {
+    await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const comercio = await this.comercios.createComercialWithComercio(dto);
     const account = await this.accounts.findById(comercio.accountId!);
     if (!account) throw new BadRequestException('No se pudo crear la cuenta del comercial');
@@ -254,6 +296,13 @@ export class AuthService {
     if (!account) {
       account = await this.accounts.findByEmail(profile.email);
       if (account) {
+        // Si la cuenta tenía password pero NUNCA se verificó el email, quien la creó pudo no
+        // ser el dueño del mail (pre-registro malicioso). Google sí verifica el email, así que
+        // se lo vincula pero se descartan la password y las sesiones previas.
+        if (!account.emailVerifiedAt && account.passwordHash) {
+          account.passwordHash = null;
+          account.refreshTokenHash = null;
+        }
         account.googleId = profile.googleId;
         account.isClaimed = true;
         account.emailVerifiedAt ??= new Date();
@@ -274,6 +323,24 @@ export class AuthService {
     }
     this.assertActive(account);
     return this.issueAndPersist(account);
+  }
+
+  /**
+   * Los tokens del login con Google NO viajan en la URL de redirección (quedarían en
+   * historial, logs y Referer). En su lugar se guardan en Redis bajo un código opaco de un
+   * solo uso y vida corta, que el front canjea por POST /auth/google/exchange.
+   */
+  async createGoogleExchangeCode(tokens: IssuedTokens): Promise<string> {
+    const code = randomBytes(32).toString('base64url');
+    await this.redis.set(`${GOOGLE_CODE_PREFIX}${code}`, JSON.stringify(tokens), 'EX', 60);
+    return code;
+  }
+
+  /** Canjea (y borra, atómico) el código de un solo uso por los tokens. */
+  async exchangeGoogleCode(code: string): Promise<IssuedTokens> {
+    const raw = await this.redis.getdel(`${GOOGLE_CODE_PREFIX}${code}`);
+    if (!raw) throw new UnauthorizedException('Codigo invalido o vencido');
+    return JSON.parse(raw) as IssuedTokens;
   }
 
   /** Reclamo de cuenta no reclamada: verifica codigo y setea password. */
@@ -299,6 +366,9 @@ export class AuthService {
 
   /** Genera un codigo de verificacion/reclamo y lo envia por email. */
   async requestCode(email: string, purpose: VerificationPurpose): Promise<void> {
+    // Cooldown por contacto: no se reenvía antes de 60s (anti bombardeo de emails). La
+    // respuesta del endpoint es la misma, así que no se filtra si el email existe.
+    if (!(await this.verification.canIssue(email, purpose))) return;
     const account = await this.accounts.findByEmail(email);
     const { code } = await this.verification.issue({
       contact: email,
@@ -331,5 +401,7 @@ export class AuthService {
     const passwordHash = await argon2.hash(dto.newPassword);
     await this.accounts.setPassword(account.id, passwordHash);
     await this.accounts.setRefreshTokenHash(account.id, null);
+    // Recibió y usó el código en su casilla: el email queda verificado.
+    if (!account.emailVerifiedAt) await this.accounts.markEmailVerified(account.id);
   }
 }

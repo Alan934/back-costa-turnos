@@ -13,6 +13,7 @@ import { Roles } from '@/common/decorators/roles.decorator';
 import { Public } from '@/common/decorators/public.decorator';
 import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
+import { MpWebhookGuard } from '@/modules/payments/mp-webhook.guard';
 import { SubscriptionsService } from './subscriptions.service';
 import { Subscription } from './entities/subscription.entity';
 import { SubscriptionPayment } from './entities/subscription-payment.entity';
@@ -62,6 +63,7 @@ export class SubscriptionsController {
 
   /** Webhook publico de MercadoPago para los pagos de suscripcion. */
   @Public()
+  @UseGuards(MpWebhookGuard)
   @ApiExcludeEndpoint()
   @HttpCode(HttpStatus.OK)
   @Post('mp/webhook')

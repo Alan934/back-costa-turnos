@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -16,13 +17,16 @@ import {
 } from './swagger';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
   // Logger estructurado (pino)
   app.useLogger(app.get(Logger));
 
   const config = app.get(ConfigService);
   const appConfig = config.getOrThrow<AppConfig>('app');
+
+  // IP real del cliente detrás del proxy (rate limit por usuario). Solo si TRUST_PROXY está seteado.
+  if (appConfig.trustProxy !== false) app.set('trust proxy', appConfig.trustProxy);
 
   app.use(helmet());
   app.enableCors({ origin: appConfig.corsOrigins, credentials: true });

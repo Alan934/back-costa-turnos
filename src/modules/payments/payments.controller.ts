@@ -17,6 +17,7 @@ import { Public } from '@/common/decorators/public.decorator';
 import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
 import { PaymentsService } from './payments.service';
+import { MpWebhookGuard } from './mp-webhook.guard';
 import { ChargeService } from './charge.service';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { Payment } from './entities/payment.entity';
@@ -215,6 +216,7 @@ export class PaymentsController {
   @ApiBody({ schema: { type: 'object', additionalProperties: true } })
   @ApiResponse({ status: 200, description: 'Acuse de recibo { ok: true }' })
   @Public()
+  @UseGuards(MpWebhookGuard)
   @HttpCode(HttpStatus.OK)
   @Post('mp/webhook')
   async webhook(@Body() payload: Record<string, unknown>): Promise<{ ok: true }> {
