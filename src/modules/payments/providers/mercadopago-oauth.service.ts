@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { createHmac } from 'node:crypto';
 import { MercadoPagoConfig, OAuth } from 'mercadopago';
 import { JwtConfig, MercadoPagoConfig as MpConfig } from '@/config/configuration';
 
@@ -27,7 +28,10 @@ export class MercadoPagoOAuthService {
     private readonly jwt: JwtService,
   ) {
     this.mp = config.getOrThrow<MpConfig>('mercadopago');
-    this.stateSecret = config.getOrThrow<JwtConfig>('jwt').accessSecret;
+    // Secreto DERIVADO (no el de los access tokens): un JWT de sesión nunca vale como `state`.
+    this.stateSecret = createHmac('sha256', config.getOrThrow<JwtConfig>('jwt').accessSecret)
+      .update('mp_oauth_state_v1')
+      .digest('hex');
   }
 
   isConfigured(): boolean {

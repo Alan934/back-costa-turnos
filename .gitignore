@@ -32,3 +32,6 @@ Thumbs.db
 # otros
 modelo-de-datos.md
 ENDPOINTS-PENDIENTES.md
+# volcados de Redis (pueden contener datos de colas/notificaciones)
+dump.rdb
+*.rdb

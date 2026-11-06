@@ -15,6 +15,8 @@ export interface JwtPayload {
   staffId?: string;
   /** comercios que ADMINISTRA como comercial (es dueño). */
   comercioIds?: string[];
+  /** id de la sesión (dispositivo) que emitió el token; permite cerrar solo esa sesión. */
+  sid?: string;
 }
 
 /** Usuario autenticado adjuntado a la request por la estrategia JWT. */

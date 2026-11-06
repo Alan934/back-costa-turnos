@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { JwtConfig } from '@/config/configuration';
@@ -33,7 +34,8 @@ export class TokensService {
         },
       ),
       this.jwt.signAsync(
-        { sub: payload.sub },
+        // jti aleatorio: dos refresh emitidos en el mismo segundo nunca son idénticos.
+        { sub: payload.sub, sid: payload.sid, jti: randomBytes(8).toString('hex') },
         {
           secret: this.jwtConfig.refreshSecret,
           expiresIn: this.jwtConfig.refreshTtl as unknown as number,
@@ -43,7 +45,13 @@ export class TokensService {
     return { accessToken, refreshToken };
   }
 
-  verifyRefresh(token: string): Promise<{ sub: string }> {
+  /** Fecha de expiración (exp) de un JWT ya firmado. */
+  expiryOf(token: string): Date {
+    const decoded = this.jwt.decode<{ exp?: number }>(token);
+    return new Date((decoded?.exp ?? 0) * 1000);
+  }
+
+  verifyRefresh(token: string): Promise<{ sub: string; sid?: string }> {
     return this.jwt.verifyAsync(token, { secret: this.jwtConfig.refreshSecret });
   }
 }

@@ -26,6 +26,8 @@ export const envValidationSchema = Joi.object({
       ),
     otherwise: Joi.string().default('*'),
   }),
+  // Swagger UI en /api/docs. Vacío = solo fuera de producción.
+  SWAGGER_ENABLED: Joi.string().valid('true', 'false', '').default(''),
   // Saltos de proxy de confianza (p. ej. 1 con Coolify/Traefik). Vacío = no confiar.
   TRUST_PROXY: Joi.string().allow('').default(''),
   DEFAULT_TIMEZONE: Joi.string().default('America/Argentina/Buenos_Aires'),

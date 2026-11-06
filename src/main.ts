@@ -9,6 +9,7 @@ import { AppModule } from './app.module';
 import { AppConfig } from './config/configuration';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
+import { logSecurityWarnings } from './common/security-checks';
 import {
   applyApiVersionPrefix,
   buildSwaggerConfig,
@@ -24,6 +25,7 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(ConfigService);
   const appConfig = config.getOrThrow<AppConfig>('app');
+  logSecurityWarnings(config);
 
   // IP real del cliente detrás del proxy (rate limit por usuario). Solo si TRUST_PROXY está seteado.
   if (appConfig.trustProxy !== false) app.set('trust proxy', appConfig.trustProxy);
@@ -47,11 +49,14 @@ async function bootstrap(): Promise<void> {
   await redisIoAdapter.connectToRedis();
   app.useWebSocketAdapter(redisIoAdapter);
 
-  // Swagger / OpenAPI (config compartida con el script de export, ver src/swagger.ts)
-  const document = applyApiVersionPrefix(
-    SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions),
-  );
-  SwaggerModule.setup('api/docs', app, document, swaggerUiOptions);
+  // Swagger / OpenAPI (config compartida con el script de export, ver src/swagger.ts).
+  // En producción no se publica el mapa completo de la API salvo SWAGGER_ENABLED=true.
+  if (appConfig.swaggerEnabled) {
+    const document = applyApiVersionPrefix(
+      SwaggerModule.createDocument(app, buildSwaggerConfig(), swaggerDocumentOptions),
+    );
+    SwaggerModule.setup('api/docs', app, document, swaggerUiOptions);
+  }
 
   app.enableShutdownHooks();
   await app.listen(appConfig.port, '0.0.0.0');

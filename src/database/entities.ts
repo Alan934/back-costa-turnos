@@ -6,6 +6,7 @@ import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { ComercioInvitation } from '@/modules/comercios/entities/comercio-invitation.entity';
 import { VerificationToken } from '@/modules/auth/entities/verification-token.entity';
+import { AuthSession } from '@/modules/auth/entities/auth-session.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import { FichaField } from '@/modules/clients/entities/ficha-field.entity';
 import { ClientNote } from '@/modules/clients/entities/client-note.entity';
@@ -42,6 +43,7 @@ export const entities = [
   Membership,
   ComercioInvitation,
   VerificationToken,
+  AuthSession,
   ProfessionalClient,
   FichaField,
   ClientNote,

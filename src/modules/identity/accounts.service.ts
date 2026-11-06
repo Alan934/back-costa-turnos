@@ -1,4 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type Redis from 'ioredis';
+import { REDIS_CLIENT } from '@/redis/redis.module';
+import { BLOCKED_ACCOUNT_PREFIX, BLOCKED_ACCOUNT_TTL_S } from '@/modules/auth/blocked-account';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from './entities/account.entity';
@@ -9,6 +12,7 @@ export class AccountsService {
   constructor(
     @InjectRepository(Account)
     private readonly accounts: Repository<Account>,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   findById(id: string): Promise<Account | null> {
@@ -63,6 +67,14 @@ export class AccountsService {
     if (!account) throw new NotFoundException('Cuenta no encontrada');
     account.status = status;
     if (status === AccountStatus.Blocked) account.refreshTokenHash = null;
-    return this.accounts.save(account);
+    const saved = await this.accounts.save(account);
+    // Corta también los access tokens vigentes (ver blocked-account.ts).
+    const key = `${BLOCKED_ACCOUNT_PREFIX}${id}`;
+    if (status === AccountStatus.Blocked) {
+      await this.redis.set(key, '1', 'EX', BLOCKED_ACCOUNT_TTL_S);
+    } else {
+      await this.redis.del(key);
+    }
+    return saved;
   }
 }

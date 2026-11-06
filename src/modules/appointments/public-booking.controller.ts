@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '@/common/decorators/public.decorator';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { OptionalJwtAuthGuard } from '@/common/guards/optional-jwt-auth.guard';
@@ -226,6 +227,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('services/:serviceId/book')
   async bookService(
     @Param('slug') slug: string,
@@ -256,6 +258,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Ningún profesional disponible' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('services/:serviceId/book-with-deposit')
   async bookServiceWithDeposit(
     @Param('slug') slug: string,
@@ -364,6 +367,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('professionals/:membershipId/book')
   async book(
     @Param('slug') slug: string,
@@ -388,6 +392,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @ApiResponse({ status: 409, description: 'Conflicto' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('professionals/:membershipId/book-with-deposit')
   async bookWithDeposit(
     @Param('slug') slug: string,
@@ -448,6 +453,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 403, description: 'El local no permite anotarse desde el celular' })
   @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
   @Post('professionals/:membershipId/sala/check-in')
   async selfCheckIn(
     @Param('slug') slug: string,
@@ -482,6 +488,7 @@ export class PublicBookingController {
   @ApiResponse({ status: 403, description: 'El local no permite anotarse desde el celular' })
   @ApiResponse({ status: 404, description: 'No encontrado o sala no publicada' })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
   @Post('sala/check-in')
   async selfCheckInFlat(
     @Param('slug') slug: string,
@@ -541,6 +548,7 @@ export class PublicBookingController {
   })
   @ApiResponse({ status: 201, type: Appointment })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('book')
   async bookFlat(
     @Param('slug') slug: string,
@@ -568,6 +576,7 @@ export class PublicBookingController {
     description: 'Ver ruta con membershipId. Con method=mercadopago appointment es null.',
   })
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('book-with-deposit')
   async bookWithDepositFlat(
     @Param('slug') slug: string,

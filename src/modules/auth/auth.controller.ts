@@ -91,6 +91,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthTokensDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('login')
   login(@Body() dto: LoginDto) {
@@ -101,6 +102,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthTokensDto })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {
@@ -113,8 +115,11 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @Post('logout')
-  async logout(@CurrentAccount('sub') accountId: string): Promise<void> {
-    await this.auth.logout(accountId);
+  async logout(
+    @CurrentAccount('sub') accountId: string,
+    @CurrentAccount('sid') sid?: string,
+  ): Promise<void> {
+    await this.auth.logout(accountId, sid);
   }
 
   @ApiOperation({ summary: 'Obtener el usuario autenticado' })

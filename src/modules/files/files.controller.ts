@@ -29,6 +29,7 @@ import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
 import { FilesService } from './files.service';
 import { FileObject } from './entities/file.entity';
+import { UploadFileQueryDto } from './dto/upload-query.dto';
 
 interface UploadedMulterFile {
   buffer: Buffer;
@@ -71,13 +72,12 @@ export class FilesController {
   upload(
     @CurrentTenant() tenantId: string,
     @UploadedFile() file: UploadedMulterFile | undefined,
-    @Query('ownerType') ownerType: string,
-    @Query('ownerId') ownerId: string,
+    @Query() query: UploadFileQueryDto,
   ) {
     if (!file) {
       throw new BadRequestException('No se recibio ningun archivo en el campo "file"');
     }
-    return this.files.upload(tenantId, ownerType, ownerId, {
+    return this.files.upload(tenantId, query.ownerType, query.ownerId, {
       buffer: file.buffer,
       mime: file.mimetype,
       size: file.size,

@@ -44,8 +44,13 @@ export class MailerService {
     const { subject, text, html } = this.renderCode(purpose, code, email);
 
     if (!this.transporter) {
-      // Dev/sin SMTP: log para poder continuar el flujo manualmente.
-      this.logger.warn(`[MAIL stub] ${purpose} para ${email}: ${code}`);
+      // Sin SMTP. En desarrollo se loguea el código para seguir el flujo a mano; en
+      // producción JAMÁS (los logs no son un canal seguro): solo se avisa del error de config.
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.error(`SMTP sin configurar: no se envió el código ${purpose} a ${email}`);
+      } else {
+        this.logger.warn(`[MAIL stub] ${purpose} para ${email}: ${code}`);
+      }
       return;
     }
 
