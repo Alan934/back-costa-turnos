@@ -15,6 +15,9 @@ export interface UploadInput {
 }
 
 const PDF_MIME = 'application/pdf';
+/** object_key de una imagen de servicio: <professionalId>/service/<uuid>. */
+const SERVICE_KEY_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/service\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Formatos raster aceptados (lo que reporta sharp.metadata().format). */
 const IMAGE_FORMATS = ['jpeg', 'png', 'webp'];
 /** Escalera de calidad webp si la imagen no entra en el target con la calidad base. */
@@ -133,6 +136,22 @@ export class FilesService {
 
   private mb(bytes: number): number {
     return Math.round(bytes / (1024 * 1024));
+  }
+
+  /**
+   * Valida los object_keys que un cliente quiere asociar a un servicio: deben tener el formato
+   * que genera `upload` (<tenant>/service/<uuid>) y existir como archivos subidos con
+   * ownerType "service". Evita referenciar (y luego borrar/exponer) objetos de otro tenant
+   * o claves inventadas. `alreadyOwned` son las claves que el servicio ya tenía.
+   */
+  async assertServiceImageKeys(keys: string[], alreadyOwned: string[] = []): Promise<void> {
+    const fresh = keys.filter((k) => !alreadyOwned.includes(k));
+    if (fresh.length === 0) return;
+    if (!fresh.every((k) => SERVICE_KEY_RE.test(k))) {
+      throw new BadRequestException('Imagen inválida');
+    }
+    const found = await this.files.count({ where: { objectKey: In(fresh), ownerType: 'service' } });
+    if (found !== new Set(fresh).size) throw new BadRequestException('Imagen inválida');
   }
 
   /**

@@ -182,6 +182,7 @@ export class CatalogService {
     if (membershipIds.length === 0) {
       throw new BadRequestException('Asigná al menos un profesional al servicio');
     }
+    await this.files.assertServiceImageKeys(dto.imageKeys ?? []);
     // Valida que todas pertenezcan al comercio y estén activas (orden = dto).
     const memberships = await this.comercios.getActiveMembershipsInComercio(
       comercioId,
@@ -239,6 +240,9 @@ export class CatalogService {
   async updateForComercio(comercioId: string, id: string, dto: UpdateServiceDto): Promise<Service> {
     const service = await this.services.findOne({ where: { id, comercioId } });
     if (!service) throw new NotFoundException('Servicio no encontrado');
+    if (dto.imageKeys !== undefined) {
+      await this.files.assertServiceImageKeys(dto.imageKeys, service.imageKeys ?? []);
+    }
 
     // Set de membresías resultante (nuevo si viene membershipIds; si no, el actual).
     let newMemberships: Membership[] | null = null;

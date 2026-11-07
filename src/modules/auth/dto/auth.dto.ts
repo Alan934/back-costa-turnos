@@ -26,6 +26,17 @@ export class RegisterDto {
   @IsNotEmpty()
   @TitleCase()
   fullName!: string;
+
+  @ApiPropertyOptional({
+    example: '123456',
+    description:
+      'Código de 6 dígitos enviado por email. Obligatorio solo si el email ya tiene una cuenta ' +
+      'pendiente de activar (creada por un tercero): prueba que el email es del que se registra.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(6, 6)
+  verificationCode?: string;
 }
 
 /** Registro de profesional (trabajador): cuenta + onboarding. */
@@ -87,6 +98,17 @@ export class RegisterComercialDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  @ApiPropertyOptional({
+    example: '123456',
+    description:
+      'Código de 6 dígitos enviado por email. Obligatorio solo si el email ya tiene una cuenta ' +
+      'pendiente de activar (creada por un tercero): prueba que el email es del que se registra.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(6, 6)
+  verificationCode?: string;
 }
 
 export class LoginDto {
@@ -105,6 +127,16 @@ export class RefreshDto {
   @IsString()
   @IsNotEmpty()
   refreshToken!: string;
+}
+
+export class GoogleExchangeDto {
+  @ApiProperty({
+    description: 'Código de un solo uso recibido en el redirect del login con Google',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Length(20, 128)
+  code!: string;
 }
 
 export class RequestCodeDto {

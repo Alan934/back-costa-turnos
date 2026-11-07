@@ -10,6 +10,14 @@ export interface AppConfig {
   /** URL del frontend (a donde redirigen los callbacks de Google/MercadoPago). */
   frontUrl: string;
   corsOrigins: string[] | boolean;
+  /**
+   * Proxies de confianza delante de la app (Coolify/Traefik/nginx). Hace que `req.ip` sea la IP
+   * real del cliente (necesario para que el rate limit sea por usuario y no por proxy).
+   * number = cantidad de saltos; false = no confiar (default).
+   */
+  trustProxy: number | boolean;
+  /** Expone Swagger UI (/api/docs). Por defecto solo fuera de producción. */
+  swaggerEnabled: boolean;
   defaultTimezone: string;
   logLevel: string;
 }
@@ -124,6 +132,13 @@ function parseCors(value: string): string[] | boolean {
     .filter(Boolean);
 }
 
+function parseTrustProxy(value: string | undefined): number | boolean {
+  if (!value || value === 'false') return false;
+  if (value === 'true') return true;
+  const hops = parseInt(value, 10);
+  return Number.isFinite(hops) && hops > 0 ? hops : false;
+}
+
 export default () => ({
   app: {
     env: process.env.NODE_ENV ?? 'development',
@@ -131,6 +146,11 @@ export default () => ({
     appUrl: process.env.APP_URL ?? 'http://localhost:3000',
     frontUrl: process.env.FRONT_URL ?? 'http://localhost:5173',
     corsOrigins: parseCors(process.env.CORS_ORIGINS ?? '*'),
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    swaggerEnabled:
+      process.env.SWAGGER_ENABLED != null && process.env.SWAGGER_ENABLED !== ''
+        ? process.env.SWAGGER_ENABLED === 'true'
+        : (process.env.NODE_ENV ?? 'development') !== 'production',
     defaultTimezone: process.env.DEFAULT_TIMEZONE ?? 'America/Argentina/Buenos_Aires',
     logLevel: process.env.LOG_LEVEL ?? 'info',
   } satisfies AppConfig,

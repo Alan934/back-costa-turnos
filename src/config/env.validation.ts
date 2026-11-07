@@ -10,7 +10,26 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   APP_URL: Joi.string().uri().default('http://localhost:3000'),
   FRONT_URL: Joi.string().uri().default('http://localhost:5173'),
-  CORS_ORIGINS: Joi.string().default('*'),
+  // Orígenes permitidos (CSV). En producción es OBLIGATORIO y no puede ser '*': con '*' cualquier
+  // sitio podría llamar a la API desde el navegador de un usuario. En dev default '*'.
+  CORS_ORIGINS: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .required()
+      .custom((value: string, helpers) =>
+        value
+          .split(',')
+          .map((o) => o.trim())
+          .includes('*')
+          ? helpers.error('any.invalid')
+          : value,
+      ),
+    otherwise: Joi.string().default('*'),
+  }),
+  // Swagger UI en /api/docs. Vacío = solo fuera de producción.
+  SWAGGER_ENABLED: Joi.string().valid('true', 'false', '').default(''),
+  // Saltos de proxy de confianza (p. ej. 1 con Coolify/Traefik). Vacío = no confiar.
+  TRUST_PROXY: Joi.string().allow('').default(''),
   DEFAULT_TIMEZONE: Joi.string().default('America/Argentina/Buenos_Aires'),
   LOG_LEVEL: Joi.string().valid('trace', 'debug', 'info', 'warn', 'error', 'fatal').default('info'),
 

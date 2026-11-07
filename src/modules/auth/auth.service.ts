@@ -1,11 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { uuidv7 } from 'uuidv7';
+import { LessThan, MoreThan } from 'typeorm';
+import type Redis from 'ioredis';
+import { REDIS_CLIENT } from '@/redis/redis.module';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuthSession } from './entities/auth-session.entity';
 import * as argon2 from 'argon2';
 import { AccountsService } from '@/modules/identity/accounts.service';
 import { PersonsService } from '@/modules/identity/persons.service';
@@ -30,6 +40,23 @@ import {
   VerifyEmailDto,
 } from './dto/auth.dto';
 
+const GOOGLE_CODE_PREFIX = 'auth:google:code:';
+/** Máximo de dispositivos con sesión abierta por cuenta (se descartan las más viejas). */
+const MAX_SESSIONS_PER_ACCOUNT = 10;
+/** Tras rotar, el refresh token anterior sigue valiendo unos segundos (pestañas concurrentes). */
+const ROTATION_GRACE_MS = 30_000;
+
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+const safeEqualHex = (a: string, b: string | null): boolean => {
+  if (!b || a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+};
+
+const LOGIN_FAIL_PREFIX = 'auth:login-fail:';
+/** Fallos seguidos permitidos por email antes de bloquear el login temporalmente. */
+const LOGIN_MAX_FAILS = 10;
+const LOGIN_FAIL_WINDOW_S = 15 * 60;
+
 export interface GoogleProfileInput {
   googleId: string;
   email: string;
@@ -50,6 +77,10 @@ export class AuthService {
     private readonly professionals: Repository<Professional>,
     @InjectRepository(Staff)
     private readonly staff: Repository<Staff>,
+    @Inject(REDIS_CLIENT)
+    private readonly redis: Redis,
+    @InjectRepository(AuthSession)
+    private readonly sessions: Repository<AuthSession>,
   ) {}
 
   /** Arma el payload del JWT resolviendo roles y tenant del account. */
@@ -115,12 +146,59 @@ export class AuthService {
     return { ...payload, personId: person?.id };
   }
 
-  private async issueAndPersist(account: Account): Promise<IssuedTokens> {
+  /**
+   * Emite los tokens de una sesión. Sin `rotateFrom` abre una sesión nueva (un dispositivo);
+   * con `rotateFrom` renueva la sesión existente (refresh): el refresh token cambia en cada uso.
+   */
+  private async issueAndPersist(account: Account, rotateFrom?: AuthSession): Promise<IssuedTokens> {
     const payload = await this.buildPayload(account);
-    const tokens = await this.tokens.issueTokens(payload);
-    const refreshHash = await argon2.hash(tokens.refreshToken);
-    await this.accounts.setRefreshTokenHash(account.id, refreshHash);
+    const sid = rotateFrom?.id ?? uuidv7();
+    const tokens = await this.tokens.issueTokens({ ...payload, sid });
+    const tokenHash = sha256(tokens.refreshToken);
+    const expiresAt = this.tokens.expiryOf(tokens.refreshToken);
+
+    if (rotateFrom) {
+      await this.sessions.update(
+        { id: rotateFrom.id },
+        {
+          prevTokenHash: rotateFrom.tokenHash,
+          tokenHash,
+          rotatedAt: new Date(),
+          expiresAt,
+        },
+      );
+    } else {
+      await this.sessions.save(
+        this.sessions.create({
+          id: sid,
+          accountId: account.id,
+          tokenHash,
+          prevTokenHash: null,
+          rotatedAt: null,
+          expiresAt,
+        }),
+      );
+      await this.pruneSessions(account.id);
+    }
     return tokens;
+  }
+
+  /** Borra sesiones vencidas y deja solo las MAX_SESSIONS_PER_ACCOUNT más recientes. */
+  private async pruneSessions(accountId: string): Promise<void> {
+    await this.sessions.delete({ accountId, expiresAt: LessThan(new Date()) });
+    const stale = await this.sessions.find({
+      where: { accountId },
+      order: { createdAt: 'DESC' },
+      skip: MAX_SESSIONS_PER_ACCOUNT,
+      select: { id: true },
+    });
+    if (stale.length) await this.sessions.delete(stale.map((x) => x.id));
+  }
+
+  /** Cierra TODAS las sesiones de la cuenta (cambio de contraseña, sospecha de robo, etc.). */
+  private async revokeAllSessions(accountId: string): Promise<void> {
+    await this.sessions.delete({ accountId });
+    await this.accounts.setRefreshTokenHash(accountId, null); // sesiones del esquema viejo
   }
 
   private assertActive(account: Account): void {
@@ -129,11 +207,44 @@ export class AuthService {
     }
   }
 
-  async register(dto: RegisterDto): Promise<IssuedTokens> {
-    const existing = await this.accounts.findByEmail(dto.email);
-    if (existing && existing.isClaimed) {
+  /**
+   * Antes de registrar sobre un email que YA tiene cuenta:
+   *  - reclamada (tiene dueño/password): se rechaza.
+   *  - no reclamada (la creó un tercero, p. ej. un profesional al cargar un cliente): solo
+   *    se puede tomar probando que se controla el email, con el código que se manda por mail.
+   *    Sin esta prueba, cualquiera podía registrarse con el email de otra persona y quedarse
+   *    con su cuenta (y su historial de turnos) antes de que la reclame.
+   * Devuelve la cuenta existente (si había) para reutilizarla.
+   */
+  private async assertCanRegisterOver(
+    email: string,
+    verificationCode?: string,
+  ): Promise<Account | null> {
+    const existing = await this.accounts.findByEmail(email);
+    if (!existing) return null;
+    if (existing.isClaimed) {
       throw new BadRequestException('Ya existe una cuenta con ese email');
     }
+    if (!verificationCode) {
+      // Manda el código (con cooldown) y avisa al front que lo pida.
+      await this.requestCode(email, VerificationPurpose.AccountClaim);
+      throw new ConflictException({
+        message:
+          'Ese email ya tiene una cuenta pendiente de activar. Te enviamos un código para confirmar que es tuyo.',
+        error: 'claim_required',
+      });
+    }
+    const token = await this.verification.consume(
+      email,
+      VerificationPurpose.AccountClaim,
+      verificationCode,
+    );
+    if (!token) throw new BadRequestException('Codigo invalido o vencido');
+    return existing;
+  }
+
+  async register(dto: RegisterDto): Promise<IssuedTokens> {
+    const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
 
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
@@ -141,6 +252,7 @@ export class AuthService {
       // Cuenta no reclamada: la reclama seteando password.
       existing.passwordHash = passwordHash;
       existing.isClaimed = true;
+      existing.emailVerifiedAt ??= new Date(); // probó el código enviado a ese email
       account = await this.accounts.save(existing);
     } else {
       account = await this.accounts.create({
@@ -165,15 +277,13 @@ export class AuthService {
    * El token resultante ya trae rol professional y su comercio personal.
    */
   async registerProfessional(dto: RegisterProfessionalDto): Promise<IssuedTokens> {
-    const existing = await this.accounts.findByEmail(dto.email);
-    if (existing && existing.isClaimed) {
-      throw new BadRequestException('Ya existe una cuenta con ese email');
-    }
+    const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
     if (existing) {
       existing.passwordHash = passwordHash;
       existing.isClaimed = true;
+      existing.emailVerifiedAt ??= new Date(); // probó el código enviado a ese email
       account = await this.accounts.save(existing);
     } else {
       account = await this.accounts.create({
@@ -205,6 +315,7 @@ export class AuthService {
    * rol `comercial` y el `comercioIds` del comercio recién creado.
    */
   async registerComercial(dto: RegisterComercialDto): Promise<IssuedTokens> {
+    await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const comercio = await this.comercios.createComercialWithComercio(dto);
     const account = await this.accounts.findById(comercio.accountId!);
     if (!account) throw new BadRequestException('No se pudo crear la cuenta del comercial');
@@ -212,40 +323,88 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<IssuedTokens> {
+    // Bloqueo por email tras demasiados fallos seguidos: frena la fuerza bruta DISTRIBUIDA
+    // (muchas IPs contra una misma cuenta), que el límite por IP no ve.
+    const failKey = `${LOGIN_FAIL_PREFIX}${dto.email.trim().toLowerCase()}`;
+    const fails = Number((await this.redis.get(failKey).catch(() => null)) ?? 0);
+    if (fails >= LOGIN_MAX_FAILS) {
+      throw new HttpException(
+        'Demasiados intentos fallidos. Esperá unos minutos o recuperá tu contraseña.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const account = await this.accounts.findByEmail(dto.email);
-    if (!account || !account.passwordHash) {
+    const ok = !!account?.passwordHash && (await argon2.verify(account.passwordHash, dto.password));
+    if (!account || !ok) {
+      await this.registerLoginFailure(failKey);
       throw new UnauthorizedException('Credenciales invalidas');
     }
     this.assertActive(account);
 
-    const ok = await argon2.verify(account.passwordHash, dto.password);
-    if (!ok) throw new UnauthorizedException('Credenciales invalidas');
-
+    await this.redis.del(failKey).catch(() => undefined);
     return this.issueAndPersist(account);
+  }
+
+  private async registerLoginFailure(key: string): Promise<void> {
+    try {
+      const n = await this.redis.incr(key);
+      if (n === 1) await this.redis.expire(key, LOGIN_FAIL_WINDOW_S);
+    } catch {
+      // sin Redis no se bloquea (fail-open); el límite por IP sigue aplicando
+    }
   }
 
   async refresh(refreshToken: string): Promise<IssuedTokens> {
     let sub: string;
+    let sid: string | undefined;
     try {
-      ({ sub } = await this.tokens.verifyRefresh(refreshToken));
+      ({ sub, sid } = await this.tokens.verifyRefresh(refreshToken));
     } catch {
       throw new UnauthorizedException('Refresh token invalido');
     }
 
     const account = await this.accounts.findById(sub);
-    if (!account || !account.refreshTokenHash) {
-      throw new UnauthorizedException('Sesion no encontrada');
-    }
+    if (!account) throw new UnauthorizedException('Sesion no encontrada');
     this.assertActive(account);
 
-    const matches = await argon2.verify(account.refreshTokenHash, refreshToken);
-    if (!matches) throw new UnauthorizedException('Refresh token revocado');
+    // Token del esquema viejo (sin sesión): se acepta UNA vez y se migra a sesiones.
+    if (!sid) {
+      if (!account.refreshTokenHash) throw new UnauthorizedException('Sesion no encontrada');
+      const legacyOk = await argon2.verify(account.refreshTokenHash, refreshToken);
+      if (!legacyOk) throw new UnauthorizedException('Refresh token revocado');
+      await this.accounts.setRefreshTokenHash(account.id, null);
+      return this.issueAndPersist(account);
+    }
 
-    return this.issueAndPersist(account);
+    const session = await this.sessions.findOne({
+      where: { id: sid, accountId: account.id, expiresAt: MoreThan(new Date()) },
+    });
+    if (!session) throw new UnauthorizedException('Sesion no encontrada');
+
+    const presented = sha256(refreshToken);
+    const isCurrent = safeEqualHex(presented, session.tokenHash);
+    const isRecentPrev =
+      safeEqualHex(presented, session.prevTokenHash) &&
+      !!session.rotatedAt &&
+      Date.now() - session.rotatedAt.getTime() < ROTATION_GRACE_MS;
+
+    if (!isCurrent && !isRecentPrev) {
+      // Un refresh token YA rotado se está reusando: o lo robaron o hay un cliente roto.
+      // Se cierra esa sesión; quien tenga el token legítimo deberá iniciar sesión de nuevo.
+      await this.sessions.delete({ id: session.id });
+      throw new UnauthorizedException('Refresh token revocado');
+    }
+    return this.issueAndPersist(account, session);
   }
 
-  async logout(accountId: string): Promise<void> {
-    await this.accounts.setRefreshTokenHash(accountId, null);
+  /** Cierra la sesión del dispositivo (sid) o, si el token no la trae, todas las de la cuenta. */
+  async logout(accountId: string, sid?: string): Promise<void> {
+    if (sid) {
+      await this.sessions.delete({ id: sid, accountId });
+      return;
+    }
+    await this.revokeAllSessions(accountId);
   }
 
   /** Login/registro con Google: crea o vincula account por googleId/email. */
@@ -254,10 +413,19 @@ export class AuthService {
     if (!account) {
       account = await this.accounts.findByEmail(profile.email);
       if (account) {
+        // Si la cuenta tenía password pero NUNCA se verificó el email, quien la creó pudo no
+        // ser el dueño del mail (pre-registro malicioso). Google sí verifica el email, así que
+        // se lo vincula pero se descartan la password y las sesiones previas.
+        if (!account.emailVerifiedAt && account.passwordHash) {
+          account.passwordHash = null;
+          account.refreshTokenHash = null;
+        }
+        const wiped = !account.emailVerifiedAt && !!account.passwordHash;
         account.googleId = profile.googleId;
         account.isClaimed = true;
         account.emailVerifiedAt ??= new Date();
         account = await this.accounts.save(account);
+        if (wiped) await this.sessions.delete({ accountId: account.id });
       } else {
         account = await this.accounts.create({
           email: profile.email,
@@ -274,6 +442,24 @@ export class AuthService {
     }
     this.assertActive(account);
     return this.issueAndPersist(account);
+  }
+
+  /**
+   * Los tokens del login con Google NO viajan en la URL de redirección (quedarían en
+   * historial, logs y Referer). En su lugar se guardan en Redis bajo un código opaco de un
+   * solo uso y vida corta, que el front canjea por POST /auth/google/exchange.
+   */
+  async createGoogleExchangeCode(tokens: IssuedTokens): Promise<string> {
+    const code = randomBytes(32).toString('base64url');
+    await this.redis.set(`${GOOGLE_CODE_PREFIX}${code}`, JSON.stringify(tokens), 'EX', 60);
+    return code;
+  }
+
+  /** Canjea (y borra, atómico) el código de un solo uso por los tokens. */
+  async exchangeGoogleCode(code: string): Promise<IssuedTokens> {
+    const raw = await this.redis.getdel(`${GOOGLE_CODE_PREFIX}${code}`);
+    if (!raw) throw new UnauthorizedException('Codigo invalido o vencido');
+    return JSON.parse(raw) as IssuedTokens;
   }
 
   /** Reclamo de cuenta no reclamada: verifica codigo y setea password. */
@@ -293,12 +479,16 @@ export class AuthService {
     account.isClaimed = true;
     account.emailVerifiedAt ??= new Date();
     await this.accounts.save(account);
+    await this.revokeAllSessions(account.id); // cualquier sesión previa pierde validez
 
     return this.issueAndPersist(account);
   }
 
   /** Genera un codigo de verificacion/reclamo y lo envia por email. */
   async requestCode(email: string, purpose: VerificationPurpose): Promise<void> {
+    // Cooldown por contacto: no se reenvía antes de 60s (anti bombardeo de emails). La
+    // respuesta del endpoint es la misma, así que no se filtra si el email existe.
+    if (!(await this.verification.canIssue(email, purpose))) return;
     const account = await this.accounts.findByEmail(email);
     const { code } = await this.verification.issue({
       contact: email,
@@ -330,6 +520,8 @@ export class AuthService {
     if (!account) throw new BadRequestException('Cuenta no encontrada');
     const passwordHash = await argon2.hash(dto.newPassword);
     await this.accounts.setPassword(account.id, passwordHash);
-    await this.accounts.setRefreshTokenHash(account.id, null);
+    await this.revokeAllSessions(account.id);
+    // Recibió y usó el código en su casilla: el email queda verificado.
+    if (!account.emailVerifiedAt) await this.accounts.markEmailVerified(account.id);
   }
 }

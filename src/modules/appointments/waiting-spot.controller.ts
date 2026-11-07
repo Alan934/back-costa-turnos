@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, Post, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '@/common/decorators/public.decorator';
 import { AppointmentsService } from './appointments.service';
 import { AwayDto, LeaveResultDto, MyWaitingSpotDto } from './dto/waiting-room.dto';
@@ -13,6 +14,8 @@ import { PushSubscriptionDto } from '@/modules/push/dto/push.dto';
  */
 @ApiTags('public-booking')
 @Public()
+// El token del link personal es la única credencial: acciones (salir, ausentarse, push) a 30/min.
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller({ path: 'sala', version: VERSION_NEUTRAL })
 export class WaitingSpotController {
   constructor(private readonly appointments: AppointmentsService) {}

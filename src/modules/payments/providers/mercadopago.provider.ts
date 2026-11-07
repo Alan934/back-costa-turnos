@@ -113,6 +113,8 @@ export class MercadoPagoProvider implements PaymentProvider {
         paid: status === 'approved',
         status,
         providerPaymentId: String(p.id ?? paymentId),
+        amountCents:
+          p.transaction_amount != null ? Math.round(Number(p.transaction_amount) * 100) : null,
       };
     } catch (err) {
       this.logger.warn(`No se pudo consultar el pago MP ${paymentId}: ${String(err)}`);

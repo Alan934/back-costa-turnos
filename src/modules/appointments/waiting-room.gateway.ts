@@ -5,6 +5,7 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
+  WsException,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
@@ -15,6 +16,10 @@ export interface RoomUpdatePayload {
   staffId: string;
   room: WaitingRoomDto;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Salas máximas por conexión (incluye la sala propia que Socket.IO crea con el id). */
+const MAX_ROOMS_PER_CLIENT = 5;
 
 function room(staffId: string): string {
   return `staff:${staffId}`;
@@ -29,7 +34,8 @@ function room(staffId: string): string {
  * Los nombres de evento y el namespace son parte del contrato con el front
  * (ver `src/lib/realtime/events.ts`): `waiting-room:join` / `waiting-room:update`.
  */
-@WebSocketGateway({ namespace: '/waiting-room', cors: { origin: '*' } })
+// CORS: lo fija RedisIoAdapter con CORS_ORIGINS (no se declara acá para no abrirlo a '*').
+@WebSocketGateway({ namespace: '/waiting-room' })
 export class WaitingRoomGateway implements OnGatewayConnection {
   private readonly logger = new Logger(WaitingRoomGateway.name);
 
@@ -43,10 +49,15 @@ export class WaitingRoomGateway implements OnGatewayConnection {
   @SubscribeMessage('waiting-room:join')
   onJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { staffId: string },
+    @MessageBody() data: { staffId?: unknown },
   ): { joined: string } {
-    void client.join(room(data.staffId));
-    return { joined: data.staffId };
+    // Entrada no confiable: solo UUIDs, y un tope de salas por conexión (la sala es pública
+    // pero no queremos que un cliente se suscriba a miles).
+    const staffId = typeof data?.staffId === 'string' ? data.staffId : '';
+    if (!UUID_RE.test(staffId)) throw new WsException('staffId inválido');
+    if (client.rooms.size > MAX_ROOMS_PER_CLIENT) throw new WsException('Demasiadas salas');
+    void client.join(room(staffId));
+    return { joined: staffId };
   }
 
   emitRoomUpdate(payload: RoomUpdatePayload): void {

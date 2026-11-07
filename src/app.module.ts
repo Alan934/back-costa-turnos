@@ -5,12 +5,14 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
 import { LoggerModule } from 'nestjs-pino';
+import type Redis from 'ioredis';
 
 import configuration, { AppConfig, RedisConfig, ThrottleConfig } from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
-import { RedisModule } from './redis/redis.module';
+import { RedisModule, REDIS_CLIENT } from './redis/redis.module';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler.storage';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HttpThrottlerGuard } from './common/guards/http-throttler.guard';
 
@@ -63,10 +65,14 @@ import { MeModule } from './modules/me/me.module';
     }),
 
     ThrottlerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
+      inject: [ConfigService, REDIS_CLIENT],
+      useFactory: (config: ConfigService, redis: Redis) => {
         const t = config.getOrThrow<ThrottleConfig>('throttle');
-        return { throttlers: [{ ttl: t.ttl, limit: t.limit }] };
+        // Contador compartido en Redis: el límite vale igual con varias instancias.
+        return {
+          throttlers: [{ ttl: t.ttl, limit: t.limit }],
+          storage: new RedisThrottlerStorage(redis),
+        };
       },
     }),
 

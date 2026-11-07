@@ -8,6 +8,7 @@ import { ProfessionalsModule } from '@/modules/professionals/professionals.modul
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { VerificationToken } from './entities/verification-token.entity';
+import { AuthSession } from './entities/auth-session.entity';
 import { AuthService } from './auth.service';
 import { TokensService } from './tokens.service';
 import { VerificationTokenService } from './verification-token.service';
@@ -22,7 +23,7 @@ import { AuthController } from './auth.controller';
     ProfessionalsModule,
     PassportModule,
     JwtModule.register({}),
-    TypeOrmModule.forFeature([VerificationToken, Professional, Staff]),
+    TypeOrmModule.forFeature([VerificationToken, AuthSession, Professional, Staff]),
   ],
   controllers: [AuthController],
   providers: [AuthService, TokensService, VerificationTokenService, JwtStrategy, GoogleStrategy],

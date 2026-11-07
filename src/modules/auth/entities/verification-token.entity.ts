@@ -44,4 +44,9 @@ export class VerificationToken extends BaseCreatedEntity {
   @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
   @Column({ name: 'used_at', type: 'timestamptz', nullable: true })
   usedAt!: Date | null;
+
+  /** Intentos de verificación consumidos (con acierto o no). Al llegar al tope el código se quema. */
+  @ApiProperty({ type: Number })
+  @Column({ type: 'int', default: 0 })
+  attempts!: number;
 }

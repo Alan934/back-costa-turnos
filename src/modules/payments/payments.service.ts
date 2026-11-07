@@ -228,6 +228,15 @@ export class PaymentsService {
     }
     if (payment.status === PaymentStatus.Paid) return; // idempotencia
 
+    // Un pago "aprobado" por MENOS de lo que vale el turno no lo acredita (p. ej. otro pago
+    // de un monto menor reutilizando el external_reference).
+    if (result.paid && result.amountCents != null && result.amountCents < payment.amountCents) {
+      this.logger.warn(
+        `Webhook MP: pago ${result.providerPaymentId} por ${result.amountCents} < ${payment.amountCents} (pago ${payment.id}); no se acredita.`,
+      );
+      return;
+    }
+
     payment.mercadopagoRef = result.providerPaymentId;
     if (result.paid) {
       payment.status = PaymentStatus.Paid;
