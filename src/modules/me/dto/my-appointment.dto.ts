@@ -39,10 +39,14 @@ export class MyAppointmentDto {
   @ApiProperty({ type: Boolean })
   isProvisional!: boolean;
   @ApiProperty({
+    type: String,
     format: 'uuid',
-    description: 'Servicio del turno (para consultar slots al reprogramar)',
+    nullable: true,
+    description:
+      'Servicio del turno (para consultar slots al reprogramar). Null si se anotó en la sala ' +
+      'sin elegir servicio y el profesional todavía no se lo asignó.',
   })
-  serviceId!: string;
+  serviceId!: string | null;
   @ApiProperty({
     format: 'uuid',
     description: 'Membresía profesional-en-comercio donde ocurre el turno',

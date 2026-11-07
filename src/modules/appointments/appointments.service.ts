@@ -51,6 +51,7 @@ import { AddonBookingSnapshot, PendingBooking } from './entities/pending-booking
 import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
 import {
   MyWaitingSpotDto,
+  NO_SERVICE_LABEL,
   SelfCheckInResultDto,
   WaitingItemDto,
   WaitingRoomDto,
@@ -1048,17 +1049,19 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
     // Embebe datos del cliente (nombre/telefono/email) y del servicio (campos
     // derivados) para que el front los muestre sin resolver cada relacion aparte.
-    const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
+    const serviceIds = [
+      ...new Set(appts.map((a) => a.serviceId).filter((id): id is string => !!id)),
+    ];
     const personIds = [...new Set(appts.map((a) => a.personId))];
     const [services, persons] = await Promise.all([
-      this.services.find({ where: { id: In(serviceIds) } }),
+      serviceIds.length ? this.services.find({ where: { id: In(serviceIds) } }) : [],
       this.persons.findByIds(personIds),
     ]);
     const serviceNameById = new Map(services.map((s) => [s.id, s.name]));
     const personById = new Map(persons.map((p) => [p.id, p]));
 
     for (const a of appts) {
-      a.serviceName = serviceNameById.get(a.serviceId) ?? 'Servicio';
+      a.serviceName = (a.serviceId && serviceNameById.get(a.serviceId)) || NO_SERVICE_LABEL;
       const person = personById.get(a.personId);
       a.personName = person?.fullName ?? '';
       a.personPhone = person?.phone ?? null;
@@ -1248,7 +1251,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       }),
     ]);
 
-    const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
+    // Quien se anotó sin elegir servicio no tiene (serviceId null): se estima con la duración
+    // por defecto hasta que el profesional se lo asigne.
+    const serviceIds = [
+      ...new Set(appts.map((a) => a.serviceId).filter((id): id is string => !!id)),
+    ];
     const personIds = [...new Set(appts.map((a) => a.personId))];
     const [services, persons, learned] = await Promise.all([
       serviceIds.length ? this.services.find({ where: { id: In(serviceIds) } }) : [],
@@ -1261,7 +1268,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     // ETA aprendido: cuánto tarda DE VERDAD este profesional en cada servicio (promedio
     // de sus últimas atenciones). Sin suficientes datos, cae a la duración configurada.
     const duration = (a: Appointment) =>
-      learned.get(a.serviceId) ?? serviceById.get(a.serviceId)?.durationMinutes ?? 30;
+      (a.serviceId
+        ? (learned.get(a.serviceId) ?? serviceById.get(a.serviceId)?.durationMinutes)
+        : undefined) ?? AppointmentsService.DEFAULT_WALK_IN_MINUTES;
 
     const attendance = membership
       ? await this.availability.getWalkInSchedule(membership)
@@ -1286,7 +1295,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       position,
       etaMinutes,
       status: a.status,
-      serviceName: serviceById.get(a.serviceId)?.name ?? 'Servicio',
+      serviceId: a.serviceId,
+      serviceName: (a.serviceId && serviceById.get(a.serviceId)?.name) || NO_SERVICE_LABEL,
       startAt: a.startAt.toISOString(),
       checkedInAt: a.checkedInAt ? a.checkedInAt.toISOString() : null,
       isWalkIn: a.createdVia === CreatedVia.WalkIn,
@@ -1295,7 +1305,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       calledAt: a.calledAt ? a.calledAt.toISOString() : null,
       callCount: a.callCount,
       awayUntil: isAway(a) && a.awayUntil ? a.awayUntil.toISOString() : null,
-      etaLearned: learned.has(a.serviceId),
+      etaLearned: !!a.serviceId && learned.has(a.serviceId),
     });
 
     // Quien está ausente ("me voy y vuelvo") conserva su lugar pero no cuenta: no suma a
@@ -1321,6 +1331,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       status: membership?.waitingRoomStatus ?? WaitingRoomStatus.Open,
       note: membership?.waitingRoomNote ?? null,
       selfCheckInEnabled: membership?.waitingRoomSelfCheckIn ?? false,
+      selfCheckInAskService: membership?.waitingRoomAskService ?? false,
       selfCheckInOpen:
         !!membership?.waitingRoomEnabled &&
         !!membership.waitingRoomSelfCheckIn &&
@@ -1339,6 +1350,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
   /** Mínimo de atenciones terminadas para confiar en el promedio real en vez del configurado. */
   private static readonly MIN_LEARNED_SAMPLES = 3;
+
+  /** Duración que se asume para quien se anotó sin servicio (ETA y fin nominal del turno). */
+  private static readonly DEFAULT_WALK_IN_MINUTES = 30;
 
   /**
    * Duración real promedio (minutos) por servicio de este profesional, sobre sus
@@ -1472,7 +1486,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     membership: Membership,
     input: {
       staffId: string;
-      serviceId: string;
+      /** Sin servicio: el cliente solo se anotó; el profesional lo asigna después. */
+      serviceId?: string | null;
       personId?: string;
       fullName?: string;
       phone?: string;
@@ -1480,17 +1495,22 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     },
     opts: { needsApproval: boolean; accountId?: string | null },
   ): Promise<Appointment> {
-    const service = await this.loadService(input.serviceId);
-    if (service.comercioId !== membership.comercioId) {
-      throw new NotFoundException('El servicio no pertenece a este comercio');
-    }
-    if (!(await this.catalog.isAssigned(service.id, membership.id))) {
-      throw new NotFoundException('El profesional no ofrece este servicio');
+    const service = input.serviceId ? await this.loadService(input.serviceId) : null;
+    if (service) {
+      if (service.comercioId !== membership.comercioId) {
+        throw new NotFoundException('El servicio no pertenece a este comercio');
+      }
+      if (!(await this.catalog.isAssigned(service.id, membership.id))) {
+        throw new NotFoundException('El profesional no ofrece este servicio');
+      }
     }
 
     const personId = await this.resolvePersonId(input, opts.accountId);
     const startAt = new Date();
-    const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+    const endAt = new Date(
+      startAt.getTime() +
+        (service?.durationMinutes ?? AppointmentsService.DEFAULT_WALK_IN_MINUTES) * 60_000,
+    );
 
     const appointment = this.appointments.create({
       professionalId,
@@ -1498,7 +1518,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       membershipId: membership.id,
       staffId: input.staffId,
       personId,
-      serviceId: service.id,
+      serviceId: service?.id ?? null,
       startAt,
       endAt,
       status: opts.needsApproval ? AppointmentStatus.Requested : AppointmentStatus.Confirmed,
@@ -1532,13 +1552,46 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   }
 
   /**
+   * Asigna (o corrige) el servicio de una entrada de la sala. Es el paso del profesional para
+   * quien se anotó sin elegir: define el precio al cobrar y el tiempo estimado de la fila.
+   * Solo walk-ins: en un turno con agenda el servicio fija el horario reservado.
+   */
+  async assignService(tenantId: string, id: string, serviceId: string): Promise<Appointment> {
+    const appointment = await this.findById(tenantId, id);
+    if (appointment.createdVia !== CreatedVia.WalkIn) {
+      throw new BadRequestException('Solo se puede asignar el servicio a entradas de la sala.');
+    }
+    if (
+      appointment.status === AppointmentStatus.Cancelled ||
+      appointment.status === AppointmentStatus.NoShow
+    ) {
+      throw new BadRequestException('Este turno ya está cerrado.');
+    }
+    const service = await this.loadService(serviceId);
+    if (service.comercioId !== appointment.comercioId) {
+      throw new NotFoundException('El servicio no pertenece a este comercio');
+    }
+    if (!(await this.catalog.isAssigned(service.id, appointment.membershipId))) {
+      throw new NotFoundException('El profesional no ofrece este servicio');
+    }
+
+    appointment.serviceId = service.id;
+    appointment.service = service;
+    // En un walk-in el fin es nominal (no ocupa grilla): sigue a la duración del servicio.
+    appointment.endAt = new Date(appointment.startAt.getTime() + service.durationMinutes * 60_000);
+    const saved = await this.appointments.save(appointment);
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
+    return saved;
+  }
+
+  /**
    * Self check-in público: el cliente se anota escaneando el QR del local. Queda
    * pendiente de aprobación del profesional, así nadie mete gente en la cola sin
    * que él lo vea.
    */
   async selfCheckIn(
     membership: Membership,
-    input: { serviceId: string; fullName: string; phone: string; email?: string },
+    input: { serviceId?: string; fullName: string; phone: string; email?: string },
     accountId?: string | null,
   ): Promise<SelfCheckInResultDto> {
     if (!membership.waitingRoomEnabled || !membership.waitingRoomSelfCheckIn) {
@@ -1547,9 +1600,22 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     if (membership.waitingRoomStatus === WaitingRoomStatus.Closed) {
       throw new ForbiddenException('La sala de espera está cerrada en este momento.');
     }
+
+    // Servicio: si el cliente no eligió y el profesional ofrece uno solo, es ese (no hay nada
+    // que preguntar). Si pidió que se elija y hay varios, es obligatorio. Si no lo pidió,
+    // el cliente solo se anota y el profesional lo completa después.
+    let serviceId = input.serviceId;
+    if (!serviceId) {
+      const offered = await this.catalog.listActiveByMembership(membership.id);
+      if (offered.length === 1) serviceId = offered[0].id;
+    }
+    if (!serviceId && membership.waitingRoomAskService) {
+      throw new BadRequestException('Elegí qué venís a hacerte.');
+    }
+
     // Si el profesional define franjas por orden de llegada, solo se puede anotar dentro de ellas
     // (fuera de esas horas se atiende con turno). Sin franjas definidas no hay restricción.
-    const attendance = await this.availability.getWalkInSchedule(membership, input.serviceId);
+    const attendance = await this.availability.getWalkInSchedule(membership, serviceId);
     if (attendance.hasSchedule && !attendance.openNow) {
       throw new ForbiddenException(
         `Ahora no se atiende por orden de llegada.${describeNextWindow(attendance.nextWindow)}`,
@@ -1563,7 +1629,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const appointment = await this.createWalkIn(
       membership.professionalId,
       membership,
-      { staffId: staff.id, ...input },
+      { ...input, staffId: staff.id, serviceId },
       { needsApproval: true, accountId },
     );
     // Avisa al profesional (web push): en una fila con gente, nadie mira la pantalla.

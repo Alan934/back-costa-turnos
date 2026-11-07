@@ -9,6 +9,7 @@ import { Service } from '@/modules/catalog/entities/service.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { MetricsRange } from '@/modules/metrics/dto/metrics.dto';
+import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { CashClosingDto, PendingCashDto, PendingCompletionDto } from './dto/cash-closing.dto';
 
 // Turnos que ocupan agenda y deberían haberse cerrado (pasado su fin).
@@ -61,10 +62,12 @@ export class CashClosingService {
     const apptById = new Map(cashAppointments.map((a) => [a.id, a]));
 
     const serviceIds = [
-      ...new Set([
-        ...openAppointments.map((a) => a.serviceId),
-        ...cashAppointments.map((a) => a.serviceId),
-      ]),
+      ...new Set(
+        [
+          ...openAppointments.map((a) => a.serviceId),
+          ...cashAppointments.map((a) => a.serviceId),
+        ].filter((id): id is string => !!id),
+      ),
     ];
     const personIds = [
       ...new Set([
@@ -82,7 +85,7 @@ export class CashClosingService {
     const pendingCompletion: PendingCompletionDto[] = openAppointments.map((a) => ({
       appointmentId: a.id,
       personName: personNameById.get(a.personId) ?? 'Cliente',
-      serviceName: serviceNameById.get(a.serviceId) ?? 'Servicio',
+      serviceName: (a.serviceId && serviceNameById.get(a.serviceId)) || NO_SERVICE_LABEL,
       startAt: a.startAt.toISOString(),
       endAt: a.endAt.toISOString(),
       status: a.status,
@@ -94,7 +97,7 @@ export class CashClosingService {
         paymentId: p.id,
         appointmentId: p.appointmentId,
         personName: personNameById.get(p.personId) ?? 'Cliente',
-        serviceName: appt ? (serviceNameById.get(appt.serviceId) ?? 'Servicio') : 'Servicio',
+        serviceName: (appt?.serviceId && serviceNameById.get(appt.serviceId)) || NO_SERVICE_LABEL,
         amountCents: p.amountCents,
         status: p.status,
         appointmentStartAt: appt ? appt.startAt.toISOString() : null,

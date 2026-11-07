@@ -17,6 +17,7 @@ import {
   CompleteAppointmentDto,
 } from './dto/appointment.dto';
 import {
+  AssignServiceDto,
   CreateWalkInDto,
   MoveInQueueDto,
   SetPriorityDto,
@@ -168,6 +169,24 @@ export class AppointmentsController {
   @Post(':id/send-to-back')
   sendToBack(@CurrentTenant() tenantId: string, @Param('id') id: string) {
     return this.appointments.sendToBack(tenantId, id);
+  }
+
+  @ApiOperation({
+    summary: 'Asignar el servicio a una entrada de la sala',
+    description:
+      'Para quien se anotó sin elegir servicio (o para corregirlo): el profesional lo completa al ' +
+      'atenderlo o cobrarlo. Solo entradas de sala (walk-in); el servicio debe ser uno activo suyo.',
+  })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'No es una entrada de sala / turno cerrado' })
+  @ApiResponse({ status: 404, description: 'Turno o servicio no encontrado' })
+  @Post(':id/service')
+  assignService(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: AssignServiceDto,
+  ) {
+    return this.appointments.assignService(tenantId, id, dto.serviceId);
   }
 
   @ApiOperation({ summary: 'Subir o bajar un lugar en la fila' })

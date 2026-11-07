@@ -14,6 +14,7 @@ import {
 } from '@/common/enums';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
@@ -133,6 +134,10 @@ export class MeService {
       );
     }
 
+    // Una entrada de sala sin servicio no ocupa un horario de la grilla: no hay qué reprogramar.
+    if (!appt.serviceId) {
+      throw new BadRequestException('Este turno no se puede reprogramar.');
+    }
     const service = await this.services.findOne({ where: { id: appt.serviceId } });
     if (!service) throw new NotFoundException('Servicio no encontrado');
 
@@ -202,7 +207,9 @@ export class MeService {
     staff: Map<string, Staff>;
     professionals: Map<string, Professional>;
   }> {
-    const serviceIds = [...new Set(appts.map((a) => a.serviceId))];
+    const serviceIds = [
+      ...new Set(appts.map((a) => a.serviceId).filter((id): id is string => !!id)),
+    ];
     const staffIds = [...new Set(appts.map((a) => a.staffId))];
     const professionalIds = [...new Set(appts.map((a) => a.professionalId))];
 
@@ -227,7 +234,7 @@ export class MeService {
       professionals: Map<string, Professional>;
     },
   ): MyAppointmentDto {
-    const service = maps.services.get(a.serviceId);
+    const service = a.serviceId ? maps.services.get(a.serviceId) : undefined;
     const staff = maps.staff.get(a.staffId);
     const professional = maps.professionals.get(a.professionalId);
 
@@ -240,7 +247,7 @@ export class MeService {
       serviceId: a.serviceId,
       membershipId: a.membershipId,
       professionalId: a.professionalId,
-      serviceName: service?.name ?? 'Servicio',
+      serviceName: service?.name ?? NO_SERVICE_LABEL,
       priceCents: service?.priceCents ?? 0,
       staffName: staff?.displayName ?? '',
       publicToken: a.publicToken,

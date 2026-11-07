@@ -17,6 +17,9 @@ import { WalkInStatusDto } from '@/modules/availability/dto/availability.dto';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 
+/** Cómo se muestra un turno de sala al que todavía no se le asignó servicio. */
+export const NO_SERVICE_LABEL = 'Sin servicio';
+
 /**
  * Una persona presente en la sala de espera. Se expone tal cual en la pantalla
  * PÚBLICA del local, así que no puede llevar datos de contacto: solo nombre de
@@ -44,7 +47,15 @@ export class WaitingItemDto {
   @ApiProperty({ enum: AppointmentStatus, enumName: 'AppointmentStatus' })
   status!: AppointmentStatus;
 
-  @ApiProperty({ example: 'Corte de pelo' })
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Null = se anotó sin elegir servicio (el profesional lo asigna al atenderlo).',
+  })
+  serviceId!: string | null;
+
+  @ApiProperty({ example: 'Corte de pelo', description: '"Sin servicio" si todavía no se asignó.' })
   serviceName!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
@@ -118,6 +129,14 @@ export class WaitingRoomDto {
   selfCheckInOpen!: boolean;
 
   @ApiProperty({
+    type: Boolean,
+    description:
+      'Al anotarse, el cliente elige el servicio. false (default) = solo se anota; el profesional ' +
+      'lo completa después (si ofrece un único servicio activo, se asigna solo).',
+  })
+  selfCheckInAskService!: boolean;
+
+  @ApiProperty({
     type: WalkInStatusDto,
     description: 'Cuándo atiende por orden de llegada (franjas de hoy, próxima franja, etc.).',
   })
@@ -181,11 +200,18 @@ export class CreateWalkInDto {
  * Self check-in: el cliente se anota escaneando el QR del local. Teléfono
  * obligatorio (clave de deduplicación de personas sin cuenta, igual que en la
  * reserva pública). Si está logueado, el turno se cuelga de la Person de su cuenta.
+ *
+ * `serviceId` es obligatorio solo si el profesional activó "el cliente elige el servicio"
+ * (`selfCheckInAskService` en la sala); si no, se puede omitir.
  */
 export class SelfCheckInDto {
-  @ApiProperty({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Requerido solo si la sala pide elegir servicio (`selfCheckInAskService`).',
+  })
+  @IsOptional()
   @IsUUID()
-  serviceId!: string;
+  serviceId?: string;
 
   @ApiProperty({ example: 'Juan García' })
   @IsString()
@@ -306,6 +332,13 @@ export class MoveInQueueDto {
   @ApiProperty({ enum: ['up', 'down'] })
   @IsIn(['up', 'down'])
   direction!: 'up' | 'down';
+}
+
+/** Asigna (o corrige) el servicio de una entrada de la sala de espera. */
+export class AssignServiceDto {
+  @ApiProperty({ format: 'uuid', description: 'Servicio activo que ofrece este profesional.' })
+  @IsUUID()
+  serviceId!: string;
 }
 
 export class SetPriorityDto {

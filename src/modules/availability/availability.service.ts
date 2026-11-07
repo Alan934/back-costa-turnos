@@ -40,7 +40,8 @@ const BLOCKING_STATUSES = [
  * igual (mismo servicio cuenta contra el cupo, otro servicio bloquea).
  */
 interface BusyInterval {
-  serviceId: string;
+  /** Null: entrada de sala sin servicio (ocupa tiempo pero no cuenta como "mismo servicio"). */
+  serviceId: string | null;
   startAt: Date;
   endAt: Date;
 }

@@ -62,13 +62,17 @@ export class Appointment extends BaseEntity {
   @JoinColumn({ name: 'person_id' })
   person?: Person;
 
-  @ApiProperty({ format: 'uuid' })
-  @Column({ name: 'service_id', type: 'uuid' })
-  serviceId!: string;
+  /**
+   * Null solo en entradas de la sala de espera cuyo cliente se anotó sin elegir servicio
+   * (el profesional lo asigna al atenderlo o cobrarlo). Las reservas siempre lo traen.
+   */
+  @ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+  @Column({ name: 'service_id', type: 'uuid', nullable: true })
+  serviceId!: string | null;
 
-  @ManyToOne(() => Service, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => Service, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'service_id' })
-  service?: Service;
+  service?: Service | null;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @Column({ name: 'start_at', type: 'timestamptz' })

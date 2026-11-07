@@ -104,6 +104,14 @@ export class Membership extends BaseEntity {
   @Column({ name: 'waiting_room_self_check_in', type: 'boolean', default: false })
   waitingRoomSelfCheckIn!: boolean;
 
+  /**
+   * Al anotarse por el QR, el cliente elige el servicio. Apagado (default): solo se anota y el
+   * profesional completa el servicio al atenderlo; si ofrece uno solo, se asigna directo.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'waiting_room_ask_service', type: 'boolean', default: false })
+  waitingRoomAskService!: boolean;
+
   /** Estado operativo que ve el cliente en la pantalla publica. */
   @ApiProperty({ enum: WaitingRoomStatus, enumName: 'WaitingRoomStatus' })
   @Column({
