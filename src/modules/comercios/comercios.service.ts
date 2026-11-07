@@ -311,6 +311,7 @@ export class ComerciosService {
       walkInOnly?: boolean;
       waitingRoomEnabled?: boolean;
       waitingRoomSelfCheckIn?: boolean;
+      waitingRoomAskService?: boolean;
       waitingRoomStatus?: WaitingRoomStatus;
       waitingRoomNote?: string | null;
     },
@@ -337,6 +338,9 @@ export class ComerciosService {
     }
     if (dto.waitingRoomSelfCheckIn !== undefined) {
       membership.waitingRoomSelfCheckIn = dto.waitingRoomSelfCheckIn;
+    }
+    if (dto.waitingRoomAskService !== undefined) {
+      membership.waitingRoomAskService = dto.waitingRoomAskService;
     }
     if (dto.waitingRoomStatus !== undefined) {
       membership.waitingRoomStatus = dto.waitingRoomStatus;

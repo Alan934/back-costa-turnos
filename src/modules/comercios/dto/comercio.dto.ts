@@ -136,6 +136,17 @@ export class UpdateMembershipDto {
   waitingRoomSelfCheckIn?: boolean;
 
   @ApiPropertyOptional({
+    type: Boolean,
+    example: false,
+    description:
+      'Al anotarse por el QR el cliente elige el servicio. Apagado (default): solo se anota y el ' +
+      'profesional completa el servicio al atenderlo (con un único servicio se asigna solo).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waitingRoomAskService?: boolean;
+
+  @ApiPropertyOptional({
     enum: WaitingRoomStatus,
     enumName: 'WaitingRoomStatus',
     description: 'Estado que ve el cliente en la pantalla pública: open | paused | closed.',

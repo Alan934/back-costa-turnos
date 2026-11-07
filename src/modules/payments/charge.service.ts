@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AppointmentStatus, PaymentMethod, PaymentStatus, PaymentType } from '@/common/enums';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
+import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { AppointmentAddon } from '@/modules/appointments/entities/appointment-addon.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { computePrice, resolveServiceVat } from '@/modules/catalog/pricing';
@@ -57,7 +58,7 @@ export class ChargeService {
   async summary(tenantId: string, appointmentId: string): Promise<ChargeSummaryDto> {
     const apt = await this.loadAppointment(tenantId, appointmentId);
     const [service, addons, payments, pro] = await Promise.all([
-      this.services.findOne({ where: { id: apt.serviceId } }),
+      apt.serviceId ? this.services.findOne({ where: { id: apt.serviceId } }) : null,
       this.addons.find({ where: { appointmentId: apt.id } }),
       this.payments.find({ where: { appointmentId: apt.id }, order: { createdAt: 'ASC' } }),
       this.professionals.findOne({ where: { id: tenantId } }),
@@ -81,7 +82,7 @@ export class ChargeService {
 
     return {
       appointmentId: apt.id,
-      serviceName: service?.name ?? 'Servicio',
+      serviceName: service?.name ?? NO_SERVICE_LABEL,
       totalCents,
       paidCents,
       dueCents,
