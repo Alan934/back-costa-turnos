@@ -59,6 +59,7 @@ import {
   LeaveResultDto,
 } from './dto/waiting-room.dto';
 import { WalkInStatusDto, WalkInWindowDto } from '@/modules/availability/dto/availability.dto';
+import { computeDelayMinutes } from './waiting-room.delay';
 import { WaitingRoomGateway } from './waiting-room.gateway';
 import { WaitingRoomNotifier } from './waiting-room.notifier';
 import { PushService, BrowserSubscription } from '@/modules/push/push.service';
@@ -1270,10 +1271,14 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
     // ETA aprendido: cuánto tarda DE VERDAD este profesional en cada servicio (promedio
     // de sus últimas atenciones). Sin suficientes datos, cae a la duración configurada.
+    // Sin servicio (se anotó sin elegir) se usa lo que el profesional dijo que se demora con cada
+    // cliente.
+    const defaultMinutes =
+      membership?.waitingRoomDefaultMinutes ?? AppointmentsService.DEFAULT_WALK_IN_MINUTES;
     const duration = (a: Appointment) =>
       (a.serviceId
         ? (learned.get(a.serviceId) ?? serviceById.get(a.serviceId)?.durationMinutes)
-        : undefined) ?? AppointmentsService.DEFAULT_WALK_IN_MINUTES;
+        : undefined) ?? defaultMinutes;
 
     const attendance = membership
       ? await this.availability.getWalkInSchedule(membership)
@@ -1336,6 +1341,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       selfCheckInEnabled: membership?.waitingRoomSelfCheckIn ?? false,
       selfCheckInAskService: membership?.waitingRoomAskService ?? false,
       selfCheckInAutoAccept: membership?.waitingRoomAutoAccept ?? false,
+      defaultServiceMinutes: defaultMinutes,
+      delayMinutes: computeDelayMinutes(appts, now, duration),
       selfCheckInOpen:
         !!membership?.waitingRoomEnabled &&
         !!membership.waitingRoomSelfCheckIn &&
@@ -1355,7 +1362,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   /** Mínimo de atenciones terminadas para confiar en el promedio real en vez del configurado. */
   private static readonly MIN_LEARNED_SAMPLES = 3;
 
-  /** Duración que se asume para quien se anotó sin servicio (ETA y fin nominal del turno). */
+  /**
+   * Duración que se asume para quien se anotó sin servicio cuando el profesional no configuró otra
+   * (`membership.waitingRoomDefaultMinutes`, que arranca en este mismo valor).
+   */
   private static readonly DEFAULT_WALK_IN_MINUTES = 30;
 
   /**
@@ -1519,7 +1529,10 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const startAt = new Date();
     const endAt = new Date(
       startAt.getTime() +
-        (service?.durationMinutes ?? AppointmentsService.DEFAULT_WALK_IN_MINUTES) * 60_000,
+        (service?.durationMinutes ??
+          membership.waitingRoomDefaultMinutes ??
+          AppointmentsService.DEFAULT_WALK_IN_MINUTES) *
+          60_000,
     );
 
     const appointment = this.appointments.create({

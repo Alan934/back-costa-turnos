@@ -158,6 +158,21 @@ export class UpdateMembershipDto {
   waitingRoomAutoAccept?: boolean;
 
   @ApiPropertyOptional({
+    type: Number,
+    example: 30,
+    minimum: 5,
+    maximum: 240,
+    description:
+      'Minutos que se demora con cada cliente de la sala que no tiene servicio (se anotó sin ' +
+      'elegir). Default 30. Estima la espera de los que vienen detrás.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(240)
+  waitingRoomDefaultMinutes?: number;
+
+  @ApiPropertyOptional({
     enum: WaitingRoomStatus,
     enumName: 'WaitingRoomStatus',
     description: 'Estado que ve el cliente en la pantalla pública: open | paused | closed.',

@@ -120,6 +120,14 @@ export class Membership extends BaseEntity {
   @Column({ name: 'waiting_room_auto_accept', type: 'boolean', default: false })
   waitingRoomAutoAccept!: boolean;
 
+  /**
+   * Minutos que se demora con cada cliente de la sala que no tiene servicio (se anotó sin elegir).
+   * Estima la espera de los de atrás hasta que el profesional le asigne el servicio.
+   */
+  @ApiProperty({ type: Number, example: 30 })
+  @Column({ name: 'waiting_room_default_minutes', type: 'integer', default: 30 })
+  waitingRoomDefaultMinutes!: number;
+
   /** Estado operativo que ve el cliente en la pantalla publica. */
   @ApiProperty({ enum: WaitingRoomStatus, enumName: 'WaitingRoomStatus' })
   @Column({

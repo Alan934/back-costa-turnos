@@ -313,6 +313,7 @@ export class ComerciosService {
       waitingRoomSelfCheckIn?: boolean;
       waitingRoomAskService?: boolean;
       waitingRoomAutoAccept?: boolean;
+      waitingRoomDefaultMinutes?: number;
       waitingRoomStatus?: WaitingRoomStatus;
       waitingRoomNote?: string | null;
     },
@@ -345,6 +346,9 @@ export class ComerciosService {
     }
     if (dto.waitingRoomAutoAccept !== undefined) {
       membership.waitingRoomAutoAccept = dto.waitingRoomAutoAccept;
+    }
+    if (dto.waitingRoomDefaultMinutes !== undefined) {
+      membership.waitingRoomDefaultMinutes = dto.waitingRoomDefaultMinutes;
     }
     if (dto.waitingRoomStatus !== undefined) {
       membership.waitingRoomStatus = dto.waitingRoomStatus;

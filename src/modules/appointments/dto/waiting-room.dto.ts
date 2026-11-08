@@ -145,6 +145,25 @@ export class WaitingRoomDto {
   selfCheckInAutoAccept!: boolean;
 
   @ApiProperty({
+    type: Number,
+    example: 30,
+    description:
+      'Minutos que se demora el profesional con cada cliente sin servicio asignado. Estima la ' +
+      'espera de los de atrás.',
+  })
+  defaultServiceMinutes!: number;
+
+  @ApiProperty({
+    type: Number,
+    example: 12,
+    description:
+      'Cuántos minutos va atrasado el profesional (0 = al día). Es el mayor entre lo que se pasó ' +
+      'la atención en curso de su duración estimada y lo que lleva esperando un turno agendado ' +
+      'que ya debía haber empezado.',
+  })
+  delayMinutes!: number;
+
+  @ApiProperty({
     type: WalkInStatusDto,
     description: 'Cuándo atiende por orden de llegada (franjas de hoy, próxima franja, etc.).',
   })
