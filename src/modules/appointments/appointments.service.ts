@@ -1332,6 +1332,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       note: membership?.waitingRoomNote ?? null,
       selfCheckInEnabled: membership?.waitingRoomSelfCheckIn ?? false,
       selfCheckInAskService: membership?.waitingRoomAskService ?? false,
+      selfCheckInAutoAccept: membership?.waitingRoomAutoAccept ?? false,
       selfCheckInOpen:
         !!membership?.waitingRoomEnabled &&
         !!membership.waitingRoomSelfCheckIn &&
@@ -1630,10 +1631,16 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       membership.professionalId,
       membership,
       { ...input, staffId: staff.id, serviceId },
-      { needsApproval: true, accountId },
+      // Por defecto queda pendiente de que el profesional lo acepte; con "aceptar automáticamente"
+      // entra directo a la fila.
+      { needsApproval: !membership.waitingRoomAutoAccept, accountId },
     );
     // Avisa al profesional (web push): en una fila con gente, nadie mira la pantalla.
-    void this.notifyProfessionalOfSelfCheckIn(membership.professionalId, input.fullName);
+    void this.notifyProfessionalOfSelfCheckIn(
+      membership.professionalId,
+      input.fullName,
+      appointment.status === AppointmentStatus.Requested,
+    );
     return {
       token: appointment.publicToken ?? '',
       ticketNumber: appointment.ticketNumber ?? 0,
@@ -1644,6 +1651,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   private async notifyProfessionalOfSelfCheckIn(
     professionalId: string,
     fullName: string,
+    needsApproval: boolean,
   ): Promise<void> {
     try {
       const pro = await this.professionals.findOne({
@@ -1653,7 +1661,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       if (!pro) return;
       await this.push.sendToAccount(pro.accountId, {
         title: 'Alguien se anotó en la fila',
-        body: `${this.firstName(fullName)} se anotó desde su celular. Aceptalo para que entre.`,
+        body: needsApproval
+          ? `${this.firstName(fullName)} se anotó desde su celular. Aceptalo para que entre.`
+          : `${this.firstName(fullName)} se anotó desde su celular y ya está en la fila.`,
         url: '/app/sala',
         tag: 'sala-pendiente',
       });

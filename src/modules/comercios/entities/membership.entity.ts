@@ -112,6 +112,14 @@ export class Membership extends BaseEntity {
   @Column({ name: 'waiting_room_ask_service', type: 'boolean', default: false })
   waitingRoomAskService!: boolean;
 
+  /**
+   * Quien se anota por el QR entra directo a la fila, sin esperar a que el profesional lo
+   * acepte. Apagado (default): queda `requested` hasta que lo acepta.
+   */
+  @ApiProperty({ type: Boolean, example: false })
+  @Column({ name: 'waiting_room_auto_accept', type: 'boolean', default: false })
+  waitingRoomAutoAccept!: boolean;
+
   /** Estado operativo que ve el cliente en la pantalla publica. */
   @ApiProperty({ enum: WaitingRoomStatus, enumName: 'WaitingRoomStatus' })
   @Column({

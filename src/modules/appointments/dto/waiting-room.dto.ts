@@ -137,6 +137,14 @@ export class WaitingRoomDto {
   selfCheckInAskService!: boolean;
 
   @ApiProperty({
+    type: Boolean,
+    description:
+      'Quien se anota entra directo a la fila. false (default) = queda pendiente hasta que el ' +
+      'profesional lo acepta.',
+  })
+  selfCheckInAutoAccept!: boolean;
+
+  @ApiProperty({
     type: WalkInStatusDto,
     description: 'Cuándo atiende por orden de llegada (franjas de hoy, próxima franja, etc.).',
   })
