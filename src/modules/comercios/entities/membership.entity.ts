@@ -4,6 +4,7 @@ import { BaseEntity } from '@/common/base.entity';
 import { MembershipStatus, WaitingRoomStatus } from '@/common/enums';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Comercio } from './comercio.entity';
+import { WaitingRoomWhatsappMessagesDto } from '../dto/waiting-room-whatsapp-messages.dto';
 
 /**
  * Membresia: un profesional (trabajador) trabajando en un comercio. Es el
@@ -137,6 +138,16 @@ export class Membership extends BaseEntity {
   @ApiProperty({ type: Number, example: 30 })
   @Column({ name: 'waiting_room_default_minutes', type: 'integer', default: 30 })
   waitingRoomDefaultMinutes!: number;
+
+  /**
+   * Mensajes de WhatsApp personalizados con los que el profesional avisa a quien espera
+   * (`called` / `next` / `waiting`). NULL, o una clave ausente, = texto por defecto de la app.
+   * Son plantillas con {nombre}, {profesional}, {numero}, {personas}, {minutos} y {telefono}; las
+   * completa el front al armar el link `wa.me`.
+   */
+  @ApiPropertyOptional({ type: () => WaitingRoomWhatsappMessagesDto, nullable: true })
+  @Column({ name: 'waiting_room_whatsapp_messages', type: 'jsonb', nullable: true })
+  waitingRoomWhatsappMessages!: WaitingRoomWhatsappMessagesDto | null;
 
   /** Estado operativo que ve el cliente en la pantalla publica. */
   @ApiProperty({ enum: WaitingRoomStatus, enumName: 'WaitingRoomStatus' })

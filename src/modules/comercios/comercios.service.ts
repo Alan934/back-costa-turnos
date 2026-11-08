@@ -16,6 +16,25 @@ import { ServiceMembership } from '@/modules/catalog/entities/service-membership
 import { Comercio } from './entities/comercio.entity';
 import { Membership } from './entities/membership.entity';
 import { CreateComercialDto, UpdateComercioDto } from './dto/comercio.dto';
+import { WaitingRoomWhatsappMessagesDto } from './dto/waiting-room-whatsapp-messages.dto';
+
+const WHATSAPP_MESSAGE_KEYS = ['called', 'next', 'waiting'] as const;
+
+/**
+ * Deja solo los mensajes de WhatsApp con texto: una clave vacía o en blanco vuelve al mensaje por
+ * defecto de la app (se descarta). Sin ninguno guardado queda `null`.
+ */
+export function normalizeWhatsappMessages(
+  input: WaitingRoomWhatsappMessagesDto | null,
+): WaitingRoomWhatsappMessagesDto | null {
+  if (!input) return null;
+  const out: WaitingRoomWhatsappMessagesDto = {};
+  for (const key of WHATSAPP_MESSAGE_KEYS) {
+    const text = input[key]?.trim();
+    if (text) out[key] = text;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 @Injectable()
 export class ComerciosService {
@@ -317,6 +336,7 @@ export class ComerciosService {
       waitingRoomDefaultMinutes?: number;
       waitingRoomStatus?: WaitingRoomStatus;
       waitingRoomNote?: string | null;
+      waitingRoomWhatsappMessages?: WaitingRoomWhatsappMessagesDto | null;
     },
   ): Promise<Membership> {
     const membership = await this.getMembershipById(membershipId);
@@ -360,6 +380,11 @@ export class ComerciosService {
     if (dto.waitingRoomNote !== undefined) {
       // "" o null => limpia la nota de la pantalla pública.
       membership.waitingRoomNote = dto.waitingRoomNote ? dto.waitingRoomNote : null;
+    }
+    if (dto.waitingRoomWhatsappMessages !== undefined) {
+      membership.waitingRoomWhatsappMessages = normalizeWhatsappMessages(
+        dto.waitingRoomWhatsappMessages,
+      );
     }
     return this.memberships.save(membership);
   }

@@ -11,10 +11,13 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 import { InvitationStatus, WaitingRoomStatus } from '@/common/enums';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
+import { WaitingRoomWhatsappMessagesDto } from './waiting-room-whatsapp-messages.dto';
 
 const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -202,6 +205,18 @@ export class UpdateMembershipDto {
   @IsOptional()
   @IsString()
   waitingRoomNote?: string | null;
+
+  @ApiPropertyOptional({
+    type: () => WaitingRoomWhatsappMessagesDto,
+    nullable: true,
+    description:
+      'Mensajes de WhatsApp personalizados para avisar a quien espera (called | next | waiting). ' +
+      'Se reemplazan completos; una clave ausente o vacía usa el texto por defecto. null = todos por defecto.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WaitingRoomWhatsappMessagesDto)
+  waitingRoomWhatsappMessages?: WaitingRoomWhatsappMessagesDto | null;
 }
 
 export class InviteProfessionalDto {
