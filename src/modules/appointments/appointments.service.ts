@@ -1081,6 +1081,9 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const saved = await this.appointments.save(appointment);
     // Terminó, no vino o se canceló: ya no hay nadie esperando a quien avisarle.
     if (TERMINAL_STATUSES.includes(saved.status)) await this.push.clearAppointment(saved.id);
+    // Entró a la fila (se aceptó) o salió de ella (pasó a atención, no vino, se canceló): la fila
+    // avanza y los números se corren.
+    await this.renumberQueueOf(saved);
     await this.emitWaitingRoom(tenantId, appointment.staffId, appointment.comercioId);
     return saved;
   }
@@ -1415,6 +1418,11 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         .select('MAX(a.ticket_number)', 'max')
         .where('a.staff_id = :staffId', { staffId: appointment.staffId })
         .andWhere('a.checked_in_at BETWEEN :dayStart AND :dayEnd', { dayStart, dayEnd })
+        // Solo quienes siguen esperando: el número es el lugar en la fila, así que el de alguien
+        // que ya pasó a atención (o terminó) no cuenta, o la fila nueva arrancaría con huecos.
+        .andWhere('a.status IN (:...waiting)', {
+          waiting: [AppointmentStatus.Confirmed, AppointmentStatus.Requested],
+        })
         .getRawOne<{ max: number | null }>()
         .then((r) => r ?? { max: null });
 
@@ -1457,6 +1465,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     const appointment = await this.findById(tenantId, id);
     this.resetQueueState(appointment);
     const saved = await this.appointments.save(appointment);
+    await this.renumberQueueOf(saved);
     await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
     return saved;
   }
@@ -1709,9 +1718,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   // ---- Acciones del profesional sobre la fila ----
 
   /** Presentes y confirmados de la misma agenda/comercio que `ref`, en el orden real de la cola. */
-  private async orderedQueueOf(ref: Appointment): Promise<Appointment[]> {
+  private async orderedQueueOf(
+    ref: Appointment,
+    repo: Repository<Appointment> = this.appointments,
+  ): Promise<Appointment[]> {
     const { start, end } = await this.todayBounds(ref.professionalId);
-    const rows = await this.appointments.find({
+    const rows = await repo.find({
       where: {
         professionalId: ref.professionalId,
         staffId: ref.staffId,
@@ -1744,25 +1756,94 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
   }
 
   /**
-   * "No respondió": lo manda al final de la fila en vez de marcarlo como que no vino.
-   * Conserva su número de turno y vuelve a recibir los avisos al reacercarse.
+   * "No respondió": en vez de marcarlo como que no vino, lo manda atrás en la fila y vuelve a
+   * recibir los avisos al reacercarse. El profesional elige hasta dónde:
+   *  - `end` (default): al último lugar.
+   *  - `next`: cede el paso a quien venía detrás (un lugar atrás).
+   *
+   * El número de turno acompaña al lugar, no a la persona (ver {@link renumberQueue}). Ej.:
+   * Alan #2, Ramon #3, Test #4. Con `next` → Ramon #2, Alan #3, Test #4. Con `end` → Ramon #2,
+   * Test #3, Alan #4.
    */
-  async sendToBack(tenantId: string, id: string): Promise<Appointment> {
-    const a = await this.findById(tenantId, id);
-    if (a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+  async sendToBack(
+    tenantId: string,
+    id: string,
+    position: 'end' | 'next' = 'end',
+  ): Promise<Appointment> {
+    const first = await this.findById(tenantId, id);
+    if (first.status !== AppointmentStatus.Confirmed || !first.checkedInAt) {
       throw new BadRequestException('Solo se reordena a quien está en la fila');
     }
-    const queue = await this.orderedQueueOf(a);
-    const maxRank = Math.max(0, ...queue.map((q) => q.queueRank ?? q.checkedInAt?.getTime() ?? 0));
-    a.queueRank = maxRank + 1000;
-    a.isPriority = false;
-    a.calledAt = null;
-    a.awayUntil = null;
-    a.notifiedSecondAt = null;
-    a.notifiedNextAt = null;
-    const saved = await this.appointments.save(a);
+
+    const saved = await this.inQueueLock(first, async (repo) => {
+      // Se relee adentro del lock: la fila pudo cambiar desde la lectura de arriba.
+      const a = await repo.findOne({ where: { id: first.id, professionalId: tenantId } });
+      if (!a || a.status !== AppointmentStatus.Confirmed || !a.checkedInAt) {
+        throw new BadRequestException('Solo se reordena a quien está en la fila');
+      }
+      const queue = await this.orderedQueueOf(a, repo);
+      const idx = queue.findIndex((q) => q.id === a.id);
+      if (idx < 0) throw new BadRequestException('Solo se reordena a quien está en la fila');
+
+      // 'end': al último lugar. 'next': cede el paso a quien venía detrás (un lugar atrás); si
+      // ya era el último, es lo mismo que 'end'.
+      const passed = position === 'next' ? queue[idx + 1] : undefined;
+      const others = queue.filter((q) => q.id !== a.id);
+      others.splice(passed ? idx + 1 : others.length, 0, a);
+
+      // Dentro de su grupo de prioridad solo si cedió el paso a alguien del mismo grupo; si no,
+      // pierde la urgencia (cruzó al grupo de los no urgentes).
+      a.isPriority = !!passed && a.isPriority && passed.isPriority;
+      a.calledAt = null;
+      a.awayUntil = null;
+      a.notifiedSecondAt = null;
+      a.notifiedNextAt = null;
+      others.forEach((q, i) => (q.queueRank = (i + 1) * 1000));
+      await repo.save(others);
+
+      const renumbered = await this.renumberQueue(a, repo);
+      return renumbered.find((q) => q.id === a.id) ?? a;
+    });
+
     await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
     return saved;
+  }
+
+  /**
+   * Corre `fn` con el lock de la agenda tomado, en una transacción. Es el mismo que usa la
+   * asignación de números (`markArrival`): un alta simultánea no puede calcular su número sobre
+   * números que se están reescribiendo, ni dos reordenamientos pisarse.
+   */
+  private inQueueLock<T>(
+    ref: Appointment,
+    fn: (repo: Repository<Appointment>) => Promise<T>,
+  ): Promise<T> {
+    return this.appointments.manager.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ticket:${ref.staffId}`]);
+      return fn(manager.getRepository(Appointment));
+    });
+  }
+
+  /**
+   * El número de turno de quien espera ES su lugar en la fila: 1 el siguiente, 2 el que sigue…
+   * Cada vez que la fila cambia (alguien pasa a atención, se va, se acepta, se reordena) se
+   * reasigna 1..n en el orden real. Quien ya está en atención o terminó conserva el suyo.
+   * Debe llamarse con el lock de la agenda tomado. Devuelve la fila ya numerada.
+   */
+  private async renumberQueue(
+    ref: Appointment,
+    repo: Repository<Appointment>,
+  ): Promise<Appointment[]> {
+    const queue = await this.orderedQueueOf(ref, repo);
+    const changed = queue.filter((q, i) => q.ticketNumber !== i + 1);
+    changed.forEach((q) => (q.ticketNumber = queue.indexOf(q) + 1));
+    if (changed.length > 0) await repo.save(changed);
+    return queue;
+  }
+
+  /** {@link renumberQueue} para quien no está ya dentro del lock. */
+  private async renumberQueueOf(ref: Appointment): Promise<void> {
+    await this.inQueueLock(ref, (repo) => this.renumberQueue(ref, repo));
   }
 
   /**
@@ -1773,19 +1854,25 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
    */
   async moveInQueue(tenantId: string, id: string, direction: 'up' | 'down'): Promise<Appointment> {
     const a = await this.findById(tenantId, id);
-    const queue = await this.orderedQueueOf(a);
-    const idx = queue.findIndex((q) => q.id === a.id);
-    if (idx < 0) throw new BadRequestException('Solo se reordena a quien está en la fila');
-    const j = direction === 'up' ? idx - 1 : idx + 1;
-    if (j < 0 || j >= queue.length) return a;
-    if (queue[j].isPriority !== queue[idx].isPriority) {
-      throw new BadRequestException('Usá "Urgente" para pasar al frente de la fila');
-    }
-    [queue[idx], queue[j]] = [queue[j], queue[idx]];
-    queue.forEach((q, i) => (q.queueRank = (i + 1) * 1000));
-    await this.appointments.save(queue);
+    const moved = await this.inQueueLock(a, async (repo) => {
+      const queue = await this.orderedQueueOf(a, repo);
+      const idx = queue.findIndex((q) => q.id === a.id);
+      if (idx < 0) throw new BadRequestException('Solo se reordena a quien está en la fila');
+      const j = direction === 'up' ? idx - 1 : idx + 1;
+      if (j < 0 || j >= queue.length) return null;
+      if (queue[j].isPriority !== queue[idx].isPriority) {
+        throw new BadRequestException('Usá "Urgente" para pasar al frente de la fila');
+      }
+      [queue[idx], queue[j]] = [queue[j], queue[idx]];
+      queue.forEach((q, i) => (q.queueRank = (i + 1) * 1000));
+      await repo.save(queue);
+      // Los números siguen al lugar: al intercambiarse, también se intercambian.
+      const renumbered = await this.renumberQueue(a, repo);
+      return renumbered.find((q) => q.id === a.id) ?? a;
+    });
+    if (!moved) return a; // ya estaba en el borde: nada cambió
     await this.emitWaitingRoom(tenantId, a.staffId, a.comercioId);
-    return queue.find((q) => q.id === a.id) ?? a;
+    return moved;
   }
 
   /** Marca/desmarca a alguien como urgente: pasa al frente de la fila. */
@@ -1799,6 +1886,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     a.notifiedSecondAt = null;
     a.notifiedNextAt = null;
     const saved = await this.appointments.save(a);
+    // Pasa al frente (o deja de estar adelante): el orden cambia, los números siguen al lugar.
+    await this.renumberQueueOf(saved);
     await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
     return saved;
   }
@@ -1833,6 +1922,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     }
     await this.appointments.save(a);
     await this.push.clearAppointment(a.id);
+    await this.renumberQueueOf(a);
     await this.emitWaitingRoom(a.professionalId, a.staffId, a.comercioId);
     return { keptAppointment: scheduled };
   }

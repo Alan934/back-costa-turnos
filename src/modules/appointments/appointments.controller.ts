@@ -20,6 +20,7 @@ import {
   AssignServiceDto,
   CreateWalkInDto,
   MoveInQueueDto,
+  SendToBackDto,
   SetPriorityDto,
   WaitingRoomDto,
   WaitingRoomStatsDto,
@@ -160,15 +161,22 @@ export class AppointmentsController {
   }
 
   @ApiOperation({
-    summary: 'Mandar al final de la fila (no respondió)',
-    description: 'Alternativa a marcarlo como que no vino. Conserva su número de turno.',
+    summary: 'Mandar atrás en la fila (no respondió)',
+    description:
+      'Alternativa a marcarlo como que no vino. `position`: `end` (default) lo manda al último ' +
+      'lugar; `next` lo pasa un solo lugar atrás (cede el paso a quien venía detrás). El número ' +
+      'de turno acompaña al lugar: se reasignan 1..n según el nuevo orden.',
   })
   @ApiResponse({ status: 201, type: Appointment })
   @ApiResponse({ status: 400, description: 'No está en la fila' })
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Post(':id/send-to-back')
-  sendToBack(@CurrentTenant() tenantId: string, @Param('id') id: string) {
-    return this.appointments.sendToBack(tenantId, id);
+  sendToBack(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: SendToBackDto,
+  ) {
+    return this.appointments.sendToBack(tenantId, id, dto?.position ?? 'end');
   }
 
   @ApiOperation({

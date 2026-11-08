@@ -342,6 +342,20 @@ export class MoveInQueueDto {
   direction!: 'up' | 'down';
 }
 
+/** Hasta dónde se manda atrás a quien no respondió el llamado. */
+export class SendToBackDto {
+  @ApiPropertyOptional({
+    enum: ['end', 'next'],
+    default: 'end',
+    description:
+      '`end` = al último lugar de la fila (default). `next` = un solo lugar atrás: cede el paso a ' +
+      'quien venía detrás.',
+  })
+  @IsOptional()
+  @IsIn(['end', 'next'])
+  position?: 'end' | 'next';
+}
+
 /** Asigna (o corrige) el servicio de una entrada de la sala de espera. */
 export class AssignServiceDto {
   @ApiProperty({ format: 'uuid', description: 'Servicio activo que ofrece este profesional.' })
