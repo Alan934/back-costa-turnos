@@ -137,6 +137,33 @@ export class WaitingRoomDto {
   selfCheckInAskService!: boolean;
 
   @ApiProperty({
+    type: Boolean,
+    description:
+      'Quien se anota entra directo a la fila. false (default) = queda pendiente hasta que el ' +
+      'profesional lo acepta.',
+  })
+  selfCheckInAutoAccept!: boolean;
+
+  @ApiProperty({
+    type: Number,
+    example: 30,
+    description:
+      'Minutos que se demora el profesional con cada cliente sin servicio asignado. Estima la ' +
+      'espera de los de atrás.',
+  })
+  defaultServiceMinutes!: number;
+
+  @ApiProperty({
+    type: Number,
+    example: 12,
+    description:
+      'Cuántos minutos va atrasado el profesional (0 = al día). Es el mayor entre lo que se pasó ' +
+      'la atención en curso de su duración estimada y lo que lleva esperando un turno agendado ' +
+      'que ya debía haber empezado.',
+  })
+  delayMinutes!: number;
+
+  @ApiProperty({
     type: WalkInStatusDto,
     description: 'Cuándo atiende por orden de llegada (franjas de hoy, próxima franja, etc.).',
   })
@@ -332,6 +359,20 @@ export class MoveInQueueDto {
   @ApiProperty({ enum: ['up', 'down'] })
   @IsIn(['up', 'down'])
   direction!: 'up' | 'down';
+}
+
+/** Hasta dónde se manda atrás a quien no respondió el llamado. */
+export class SendToBackDto {
+  @ApiPropertyOptional({
+    enum: ['end', 'next'],
+    default: 'end',
+    description:
+      '`end` = al último lugar de la fila (default). `next` = un solo lugar atrás: cede el paso a ' +
+      'quien venía detrás.',
+  })
+  @IsOptional()
+  @IsIn(['end', 'next'])
+  position?: 'end' | 'next';
 }
 
 /** Asigna (o corrige) el servicio de una entrada de la sala de espera. */

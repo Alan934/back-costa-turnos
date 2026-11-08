@@ -12,7 +12,7 @@ import { AppointmentsService } from './appointments.service';
 describe('AppointmentsService.selfCheckIn — servicio opcional', () => {
   const PERSON = { fullName: 'Juan García', phone: '2612465120' };
 
-  function setup(opts: { askService: boolean; services: string[] }) {
+  function setup(opts: { askService: boolean; services: string[]; autoAccept?: boolean }) {
     const svc = Object.create(AppointmentsService.prototype) as AppointmentsService;
     const createWalkIn = jest
       .fn()
@@ -34,6 +34,7 @@ describe('AppointmentsService.selfCheckIn — servicio opcional', () => {
       waitingRoomEnabled: true,
       waitingRoomSelfCheckIn: true,
       waitingRoomAskService: opts.askService,
+      waitingRoomAutoAccept: opts.autoAccept ?? false,
       waitingRoomStatus: WaitingRoomStatus.Open,
     };
     return { svc, createWalkIn, membership };
@@ -71,5 +72,24 @@ describe('AppointmentsService.selfCheckIn — servicio opcional', () => {
     const { svc, createWalkIn, membership } = setup({ askService: true, services: ['a'] });
     await svc.selfCheckIn(membership as never, PERSON);
     expect(serviceIdPassed(createWalkIn)).toBe('a');
+  });
+
+  const needsApprovalPassed = (createWalkIn: jest.Mock) =>
+    createWalkIn.mock.calls[0][3].needsApproval;
+
+  it('por defecto: queda pendiente de que el profesional lo acepte', async () => {
+    const { svc, createWalkIn, membership } = setup({ askService: false, services: ['a'] });
+    await svc.selfCheckIn(membership as never, PERSON);
+    expect(needsApprovalPassed(createWalkIn)).toBe(true);
+  });
+
+  it('aceptar automáticamente: entra directo a la fila', async () => {
+    const { svc, createWalkIn, membership } = setup({
+      askService: false,
+      services: ['a'],
+      autoAccept: true,
+    });
+    await svc.selfCheckIn(membership as never, PERSON);
+    expect(needsApprovalPassed(createWalkIn)).toBe(false);
   });
 });
