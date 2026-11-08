@@ -5,6 +5,7 @@ import { Service } from './entities/service.entity';
 import { ServiceMembership } from './entities/service-membership.entity';
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { FilesService } from '@/modules/files/files.service';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
 
 describe('CatalogService (opciones de pago)', () => {
   let service: CatalogService;
@@ -54,12 +55,17 @@ describe('CatalogService (opciones de pago)', () => {
       ),
     };
     const files = {
+      // Valida que las imágenes pertenezcan al servicio/comercio; acá no se mandan imágenes.
+      assertServiceImageKeys: jest.fn(() => Promise.resolve()),
       removeByKeys: jest.fn(() => Promise.resolve()),
       getSignedUrlsForKeys: jest.fn(() => Promise.resolve([])),
     };
+    // attachDerived resuelve el IVA contra el profesional creador; sin filas usa el default.
+    const professionals = { find: jest.fn(() => Promise.resolve([])) };
     service = new CatalogService(
       repo as unknown as Repository<Service>,
       serviceMemberships as unknown as Repository<ServiceMembership>,
+      professionals as unknown as Repository<Professional>,
       comercios as unknown as ComerciosService,
       files as unknown as FilesService,
     );
