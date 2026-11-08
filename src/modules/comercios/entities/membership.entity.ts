@@ -86,6 +86,16 @@ export class Membership extends BaseEntity {
   @Column({ name: 'walk_in_only', type: 'boolean', default: false })
   walkInOnly!: boolean;
 
+  /**
+   * ¿Trabaja los feriados nacionales en este comercio? true (default) = los feriados no bloquean
+   * la agenda. false = cada feriado bloquea el día, salvo los que tengan una excepción
+   * (`membership_holiday_override`) marcada como "sí trabajo". Aplica también al revés: con true
+   * se puede marcar un feriado puntual como "no trabajo".
+   */
+  @ApiProperty({ type: Boolean, example: true })
+  @Column({ name: 'works_holidays', type: 'boolean', default: true })
+  worksHolidays!: boolean;
+
   // ---- Sala de espera (pantalla publica + walk-ins) ----
   /**
    * Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del

@@ -6,6 +6,7 @@ import { AppointmentStatus, AttendanceMode, ScheduleRuleKind, TimeOffType } from
 import { ComerciosService } from '@/modules/comercios/comercios.service';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { CatalogService } from '@/modules/catalog/catalog.service';
+import { HolidaysService } from '@/modules/holidays/holidays.service';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
@@ -82,6 +83,7 @@ export class AvailabilityService {
     private readonly pendingBookings: Repository<PendingBooking>,
     private readonly comercios: ComerciosService,
     private readonly catalog: CatalogService,
+    private readonly holidays: HolidaysService,
   ) {}
 
   // ---- Helpers de mapeo regla<->servicio ----
@@ -592,9 +594,21 @@ export class AvailabilityService {
     // ocupan el horario (no puede estar en dos lugares a la vez).
     const professionalId = membership.professionalId;
     const membershipIds = await this.comercios.listMembershipIds(professionalId);
-    const timeOffs = membershipIds.length
+    const manualTimeOffs = membershipIds.length
       ? await this.timeOffs.find({ where: { membershipId: In(membershipIds) } })
       : [];
+    // Feriados en los que ESTA membresía no trabaja: se tratan como un bloqueo de día completo
+    // (type=holiday, reason=nombre del feriado). Se calculan acá y no se guardan como time_off,
+    // así el booleano y las excepciones por feriado surten efecto al instante.
+    const blockedHolidays = await this.holidays.listBlockedForMembership(
+      membership,
+      rangeStart.toISODate(),
+      rangeEnd.toISODate(),
+    );
+    const timeOffs = [
+      ...manualTimeOffs,
+      ...blockedHolidays.map((h) => this.holidayAsTimeOff(membership, h.date, h.name, zone)),
+    ];
     const appointments = await this.appointments.find({
       where: {
         professionalId,
@@ -631,6 +645,23 @@ export class AvailabilityService {
       minBookingHours: membership.minBookingHours,
       maxBookingDays: membership.maxBookingDays,
     };
+  }
+
+  /** Feriado (YYYY-MM-DD) como bloqueo en memoria que cubre el día completo en la zona del comercio. */
+  private holidayAsTimeOff(
+    membership: Pick<Membership, 'id' | 'professionalId'>,
+    date: string,
+    name: string,
+    zone: string,
+  ): TimeOff {
+    const start = DateTime.fromISO(date, { zone }).startOf('day');
+    return Object.assign(new TimeOff(), {
+      membershipId: membership.id,
+      startAt: start.toJSDate(),
+      endAt: start.plus({ days: 1 }).toJSDate(),
+      type: TimeOffType.Holiday,
+      reason: name,
+    });
   }
 
   // ---- Orden de llegada ----
