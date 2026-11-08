@@ -238,7 +238,7 @@ export class AppointmentsController {
   @ApiResponse({ status: 404, description: 'No encontrado' })
   @Get(':id')
   get(@CurrentTenant() tenantId: string, @Param('id') id: string) {
-    return this.appointments.findById(tenantId, id);
+    return this.appointments.findByIdWithContact(tenantId, id);
   }
 
   @ApiOperation({ summary: 'Confirmar un turno' })
