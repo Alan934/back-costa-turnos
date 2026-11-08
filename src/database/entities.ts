@@ -32,6 +32,8 @@ import { Consent } from '@/modules/legal/entities/consent.entity';
 import { AuditLog } from '@/modules/legal/entities/audit-log.entity';
 import { FileObject } from '@/modules/files/entities/file.entity';
 import { PushSubscription } from '@/modules/push/entities/push-subscription.entity';
+import { Holiday } from '@/modules/holidays/entities/holiday.entity';
+import { MembershipHolidayOverride } from '@/modules/holidays/entities/membership-holiday-override.entity';
 
 /** Lista unica de entidades para el DataSource y TypeOrmModule. */
 export const entities = [
@@ -69,4 +71,6 @@ export const entities = [
   AuditLog,
   FileObject,
   PushSubscription,
+  Holiday,
+  MembershipHolidayOverride,
 ];

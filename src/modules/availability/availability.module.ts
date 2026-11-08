@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfessionalsModule } from '@/modules/professionals/professionals.module';
 import { CatalogModule } from '@/modules/catalog/catalog.module';
+import { HolidaysModule } from '@/modules/holidays/holidays.module';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { PendingBooking } from '@/modules/appointments/entities/pending-booking.entity';
 import { ScheduleRule } from './entities/schedule-rule.entity';
@@ -24,6 +25,7 @@ import { ComercioAvailabilityController } from './comercio-availability.controll
     ]),
     ProfessionalsModule,
     CatalogModule,
+    HolidaysModule,
   ],
   controllers: [AvailabilityController, ComercioAvailabilityController],
   providers: [AvailabilityService],

@@ -119,6 +119,19 @@ export class UpdateMembershipDto {
     type: Boolean,
     example: true,
     description:
+      '¿Trabaja los feriados nacionales? true (default) = la agenda no se bloquea. false = cada ' +
+      'feriado bloquea el día, salvo los que el profesional marque puntualmente como "sí trabajo" ' +
+      '(PUT /comercios/:comercioId/holidays/:date). Con true también puede marcar un feriado ' +
+      'puntual como "no trabajo".',
+  })
+  @IsOptional()
+  @IsBoolean()
+  worksHolidays?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: true,
+    description:
       'Publica la sala de espera de esta agenda en /r/:slug/sala (la pantalla del QR del local).',
   })
   @IsOptional()

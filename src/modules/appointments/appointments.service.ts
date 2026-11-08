@@ -1040,6 +1040,19 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     return appointment;
   }
 
+  /**
+   * Un turno con los datos de contacto del cliente embebidos (igual que `list`). Para el panel del
+   * profesional, que los necesita para escribirle por WhatsApp; nunca para pantallas públicas.
+   */
+  async findByIdWithContact(tenantId: string, id: string): Promise<Appointment> {
+    const appointment = await this.findById(tenantId, id);
+    const [person] = await this.persons.findByIds([appointment.personId]);
+    appointment.personName = person?.fullName ?? '';
+    appointment.personPhone = person?.phone ?? null;
+    appointment.personEmail = person?.email ?? null;
+    return appointment;
+  }
+
   async list(tenantId: string, staffId?: string): Promise<Appointment[]> {
     const appts = await this.appointments.find({
       where: { professionalId: tenantId, ...(staffId ? { staffId } : {}) },

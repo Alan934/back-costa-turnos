@@ -24,6 +24,7 @@ import { ProfessionalsModule } from './modules/professionals/professionals.modul
 import { ClientsModule } from './modules/clients/clients.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
+import { HolidaysModule } from './modules/holidays/holidays.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -103,6 +104,7 @@ import { MeModule } from './modules/me/me.module';
     ProfessionalsModule,
     ClientsModule,
     CatalogModule,
+    HolidaysModule,
     AvailabilityModule,
     AppointmentsModule,
     WaitlistModule,
