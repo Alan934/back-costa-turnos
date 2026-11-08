@@ -76,7 +76,8 @@ export class MpOAuthController {
     @Res() res: Response,
   ): Promise<void> {
     const back = (ok: boolean): string => {
-      const url = new URL('/ajustes/pagos', this.frontReturnUrl);
+      // Sección "Cobros" del panel del profesional (el front mantiene /ajustes/pagos como redirect).
+      const url = new URL('/app/cobros', this.frontReturnUrl);
       url.searchParams.set('mp', ok ? 'connected' : 'error');
       return url.toString();
     };
