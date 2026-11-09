@@ -1,13 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export enum MetricsRange {
   Week = 'week',
   Month = 'month',
 }
 
-export class MetricsQueryDto {
+/** Período (semana/mes y cuántos hacia atrás). */
+export class MetricsPeriodQueryDto {
   @ApiProperty({ enum: MetricsRange, enumName: 'MetricsRange', required: false, default: 'week' })
   @IsOptional()
   @IsEnum(MetricsRange)
@@ -27,6 +28,18 @@ export class MetricsQueryDto {
   @Min(0)
   @Max(120)
   offset?: number;
+}
+
+export class MetricsQueryDto extends MetricsPeriodQueryDto {
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    description:
+      'Solo lo que pasó en este comercio. Sin valor = todos los comercios del profesional.',
+  })
+  @IsOptional()
+  @IsUUID()
+  comercioId?: string;
 }
 
 export class MetricsPeriodDto {
@@ -171,7 +184,64 @@ export class AtRiskClientDto {
   visits!: number;
 }
 
+export class PaymentMethodMetricsDto {
+  @ApiProperty({ enum: ['cash', 'mercadopago', 'transfer'] })
+  method!: string;
+  @ApiProperty({ type: Number })
+  count!: number;
+  @ApiProperty({ type: Number, description: 'Cobrado por este medio, sin IVA, en centavos.' })
+  cents!: number;
+  @ApiProperty({
+    type: Number,
+    description: 'IVA que pagó el cliente encima (solo Mercado Pago; cubre la comisión).',
+  })
+  vatCents!: number;
+}
+
+export class CancellationReasonMetricsDto {
+  @ApiProperty({ enum: ['client', 'professional', 'bumped', 'no_show', 'other'] })
+  reason!: string;
+  @ApiProperty({ type: Number })
+  count!: number;
+}
+
+export class BookingChannelsDto {
+  @ApiProperty({ type: Number, description: 'Reservados por el cliente con el link (online).' })
+  online!: number;
+  @ApiProperty({ type: Number, description: 'Cargados a mano por el profesional.' })
+  manual!: number;
+  @ApiProperty({ type: Number, description: 'Llegaron sin turno a la sala de espera.' })
+  walkIn!: number;
+}
+
+export class WaitingRoomMetricsDto {
+  @ApiProperty({ type: Number, description: 'Personas que pasaron por la sala de espera.' })
+  checkedIn!: number;
+  @ApiProperty({ type: Number, description: 'Espera promedio (llegada → empieza), en minutos.' })
+  avgWaitMinutes!: number;
+  @ApiProperty({ type: Number })
+  maxWaitMinutes!: number;
+  @ApiProperty({ type: Number, description: 'Duración real promedio de la atención, en minutos.' })
+  avgServiceMinutes!: number;
+  @ApiProperty({ type: Number, description: 'De los atendidos, cuántos llegaron sin turno.' })
+  walkInsAttended!: number;
+}
+
+export class RetainedDepositsDto {
+  @ApiProperty({ type: Number, description: 'Señas cobradas de turnos a los que no vinieron.' })
+  cents!: number;
+  @ApiProperty({ type: Number })
+  count!: number;
+}
+
 export class MetricsOverviewDto {
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Comercio filtrado, o null si son todos.',
+  })
+  comercioId!: string | null;
   @ApiProperty({ enum: MetricsRange, enumName: 'MetricsRange' })
   range!: MetricsRange;
   @ApiProperty({ type: Number })
@@ -206,6 +276,16 @@ export class MetricsOverviewDto {
   atRiskClients!: AtRiskClientDto[];
   @ApiProperty({ type: Number, description: 'Total de clientes que dejaron de venir.' })
   atRiskTotal!: number;
+  @ApiProperty({ type: PaymentMethodMetricsDto, isArray: true })
+  byPaymentMethod!: PaymentMethodMetricsDto[];
+  @ApiProperty({ type: CancellationReasonMetricsDto, isArray: true })
+  cancellationsByReason!: CancellationReasonMetricsDto[];
+  @ApiProperty({ type: BookingChannelsDto })
+  bookingChannels!: BookingChannelsDto;
+  @ApiProperty({ type: WaitingRoomMetricsDto })
+  waitingRoom!: WaitingRoomMetricsDto;
+  @ApiProperty({ type: RetainedDepositsDto })
+  retainedDeposits!: RetainedDepositsDto;
 }
 
 // ---- Métricas del equipo (vista del dueño del comercio) ----

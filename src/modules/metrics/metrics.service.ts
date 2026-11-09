@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, LessThan, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { DateTime } from 'luxon';
 import {
   AppointmentStatus,
   AttendanceMode,
+  CancellationReason,
   CreatedVia,
   MembershipStatus,
   PaymentMethod,
@@ -23,6 +24,11 @@ import { TimeOff } from '@/modules/availability/entities/time-off.entity';
 import { HolidaysService } from '@/modules/holidays/holidays.service';
 import {
   AtRiskClientDto,
+  BookingChannelsDto,
+  CancellationReasonMetricsDto,
+  PaymentMethodMetricsDto,
+  RetainedDepositsDto,
+  WaitingRoomMetricsDto,
   ComercioTeamMetricsDto,
   TeamMemberMetricsDto,
   MetricsOverviewDto,
@@ -89,7 +95,16 @@ export class MetricsService {
     tenantId: string,
     range: MetricsRange,
     offset = 0,
+    comercioId?: string,
   ): Promise<MetricsOverviewDto> {
+    // Filtro por comercio: solo uno donde el profesional trabaja (o trabajó).
+    if (comercioId) {
+      const works = await this.memberships.count({
+        where: { professionalId: tenantId, comercioId },
+      });
+      if (!works) throw new ForbiddenException('No trabajás en ese comercio');
+    }
+    const byComercio = comercioId ? { comercioId } : {};
     const professional = await this.professionals.findOne({ where: { id: tenantId } });
     const tz = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
     const now = DateTime.now().setZone(tz);
@@ -102,22 +117,27 @@ export class MetricsService {
     // Solo los turnos y cobros de los dos períodos (actual + anterior), no todo el historial.
     const [appts, paidPayments, schedule] = await Promise.all([
       this.appointments.find({
-        where: { professionalId: tenantId, startAt: Between(from, until) },
-        select: ['id', 'personId', 'startAt', 'endAt', 'status', 'serviceId', 'createdVia'],
+        where: { professionalId: tenantId, ...byComercio, startAt: Between(from, until) },
+        select: [
+          'id',
+          'personId',
+          'startAt',
+          'endAt',
+          'status',
+          'serviceId',
+          'createdVia',
+          'cancellationReason',
+        ],
       }),
       // Ingresos: solo pagos efectivamente cobrados (Paid), por fecha de cobro. Incluye
       // señas, MercadoPago y efectivo confirmado; el efectivo no cobrado/pagaré no suma.
       // Se excluye el IVA (pass-through para cubrir la comisión MP): ingreso = base.
-      this.payments.find({
-        where: {
-          professionalId: tenantId,
-          status: PaymentStatus.Paid,
-          paidAt: Between(from, until),
-        },
-        select: ['amountCents', 'vatAmountCents', 'paidAt'],
-      }),
+      // Con filtro por comercio solo cuentan los cobros de turnos de ese comercio.
+      this.paidPayments(tenantId, from, until, comercioId),
       this.memberships
-        .find({ where: { professionalId: tenantId, status: MembershipStatus.Active } })
+        .find({
+          where: { professionalId: tenantId, status: MembershipStatus.Active, ...byComercio },
+        })
         .then((ms) => this.loadSchedule(ms, previous.start, current.until)),
     ]);
 
@@ -179,12 +199,15 @@ export class MetricsService {
       (p) => (firstDone.get(p) ?? 0) >= current.start.toMillis(),
     ).length;
 
-    const [pending, atRisk] = await Promise.all([
-      this.pending(tenantId, now),
+    const [pending, atRisk, waitingRoom, retainedDeposits] = await Promise.all([
+      this.pending(tenantId, now, comercioId),
       this.atRiskClients(tenantId, now),
+      this.waitingRoom(tenantId, current, comercioId),
+      this.retainedDeposits(tenantId, current, comercioId),
     ]);
 
     return {
+      comercioId: comercioId ?? null,
       range,
       offset,
       period: periodDto(current),
@@ -199,6 +222,102 @@ export class MetricsService {
       pending,
       atRiskClients: atRisk.clients,
       atRiskTotal: atRisk.total,
+      byPaymentMethod: byPaymentMethod(within(paidPayments, current, 'paidAt')),
+      cancellationsByReason: cancellationsByReason(inCurrent),
+      bookingChannels: bookingChannels(inCurrent),
+      waitingRoom,
+      retainedDeposits,
+    };
+  }
+
+  // ---- Cobros ----
+
+  private paidPayments(
+    tenantId: string,
+    from: Date,
+    until: Date,
+    comercioId?: string,
+  ): Promise<Payment[]> {
+    const qb = this.payments
+      .createQueryBuilder('p')
+      .select(['p.amountCents', 'p.vatAmountCents', 'p.paidAt', 'p.method', 'p.type'])
+      .where('p.professional_id = :tenantId', { tenantId })
+      .andWhere('p.status = :paid', { paid: PaymentStatus.Paid })
+      .andWhere('p.paid_at BETWEEN :from AND :until', { from, until });
+    if (comercioId) {
+      qb.innerJoin(Appointment, 'a', 'a.id = p.appointment_id').andWhere(
+        'a.comercio_id = :comercioId',
+        { comercioId },
+      );
+    }
+    return qb.getMany();
+  }
+
+  /**
+   * Señas que el profesional se quedó porque el cliente no vino: pagos de seña cobrados (no
+   * devueltos) de turnos del período marcados como ausentes. Es la plata que la seña le salvó.
+   */
+  private async retainedDeposits(
+    tenantId: string,
+    period: Period,
+    comercioId?: string,
+  ): Promise<RetainedDepositsDto> {
+    const params: unknown[] = [tenantId, period.start.toJSDate(), period.until.toJSDate()];
+    if (comercioId) params.push(comercioId);
+    const [row] = await this.appointments.query<{ cents: number; n: number }[]>(
+      `SELECT COALESCE(SUM(p.amount_cents - p.vat_amount_cents), 0)::int AS cents,
+              COUNT(DISTINCT a.id)::int AS n
+         FROM payment p
+         JOIN appointment a ON a.id = p.appointment_id AND a.deleted_at IS NULL
+        WHERE p.professional_id = $1 AND p.type = 'deposit' AND p.status = 'paid'
+          AND p.deleted_at IS NULL AND a.status = 'no_show'
+          AND a.start_at BETWEEN $2 AND $3
+          ${comercioId ? 'AND a.comercio_id = $4' : ''}`,
+      params,
+    );
+    return { cents: Number(row?.cents ?? 0), count: Number(row?.n ?? 0) };
+  }
+
+  // ---- Sala de espera ----
+
+  /**
+   * Tiempos reales de la sala en el período (por fecha de llegada): cuánto espera la gente,
+   * cuánto dura de verdad una atención y cuántos vinieron sin turno. Mismo criterio que las
+   * estadísticas de la Sala: una atención abierta horas (se olvidó "Terminé") no cuenta.
+   */
+  private async waitingRoom(
+    tenantId: string,
+    period: Period,
+    comercioId?: string,
+  ): Promise<WaitingRoomMetricsDto> {
+    const params: unknown[] = [tenantId, period.start.toJSDate(), period.until.toJSDate()];
+    if (comercioId) params.push(comercioId);
+    const rows = await this.appointments.query<
+      { status: string; created_via: string; wait_min: string | null; service_min: string | null }[]
+    >(
+      `SELECT a.status, a.created_via,
+              EXTRACT(EPOCH FROM (a.actual_start_at - a.checked_in_at)) / 60 AS wait_min,
+              EXTRACT(EPOCH FROM (a.completed_at - a.actual_start_at)) / 60 AS service_min
+         FROM appointment a
+        WHERE a.professional_id = $1 AND a.deleted_at IS NULL
+          AND a.checked_in_at BETWEEN $2 AND $3
+          ${comercioId ? 'AND a.comercio_id = $4' : ''}`,
+      params,
+    );
+    const done = rows.filter((r) => (r.status as AppointmentStatus) === AppointmentStatus.Done);
+    const waits = done.map((r) => Number(r.wait_min)).filter((n) => Number.isFinite(n) && n >= 0);
+    const serviceMins = done
+      .map((r) => Number(r.service_min))
+      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 240);
+    const avg = (xs: number[]) =>
+      xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0;
+    return {
+      checkedIn: rows.length,
+      avgWaitMinutes: avg(waits),
+      maxWaitMinutes: waits.length ? Math.round(Math.max(...waits)) : 0,
+      avgServiceMinutes: avg(serviceMins),
+      walkInsAttended: done.filter((r) => (r.created_via as CreatedVia) === CreatedVia.WalkIn)
+        .length,
     };
   }
 
@@ -539,19 +658,24 @@ export class MetricsService {
 
   // ---- Pendientes a hoy ----
 
-  private async pending(tenantId: string, now: DateTime) {
+  private async pending(tenantId: string, now: DateTime, comercioId?: string) {
+    const unpaidQb = this.payments
+      .createQueryBuilder('p')
+      .select(['p.amountCents'])
+      .where('p.professional_id = :tenantId', { tenantId })
+      .andWhere('p.method IN (:...methods)', { methods: OFF_SYSTEM_METHODS })
+      .andWhere('p.status IN (:...statuses)', { statuses: UNPAID_CASH });
+    if (comercioId) {
+      unpaidQb
+        .innerJoin(Appointment, 'a', 'a.id = p.appointment_id')
+        .andWhere('a.comercio_id = :comercioId', { comercioId });
+    }
     const [unpaid, unclosedAppointments] = await Promise.all([
-      this.payments.find({
-        where: {
-          professionalId: tenantId,
-          method: In(OFF_SYSTEM_METHODS),
-          status: In(UNPAID_CASH),
-        },
-        select: ['amountCents'],
-      }),
+      unpaidQb.getMany(),
       this.appointments.count({
         where: {
           professionalId: tenantId,
+          ...(comercioId ? { comercioId } : {}),
           status: In(OPEN_STATUSES),
           endAt: LessThan(now.toJSDate()),
         },
@@ -567,13 +691,57 @@ export class MetricsService {
 
 // ---- Helpers ----
 
-function within<T extends { startAt: Date }>(items: T[], period: Period): T[] {
+function within<T>(items: T[], period: Period, key: keyof T = 'startAt' as keyof T): T[] {
   const start = period.start.toMillis();
   const end = period.until.toMillis();
   return items.filter((a) => {
-    const t = a.startAt.getTime();
+    const t = (a[key] as unknown as Date | null)?.getTime() ?? NaN;
     return t >= start && t <= end;
   });
+}
+
+const PAYMENT_METHOD_ORDER = [
+  PaymentMethod.Cash,
+  PaymentMethod.MercadoPago,
+  PaymentMethod.Transfer,
+];
+
+function byPaymentMethod(payments: Payment[]): PaymentMethodMetricsDto[] {
+  return PAYMENT_METHOD_ORDER.map((method) => {
+    const mine = payments.filter((p) => p.method === method);
+    return {
+      method,
+      count: mine.length,
+      cents: mine.reduce((acc, p) => acc + (p.amountCents - p.vatAmountCents), 0),
+      vatCents: mine.reduce((acc, p) => acc + p.vatAmountCents, 0),
+    };
+  }).filter((m) => m.count > 0);
+}
+
+const CANCELLATION_ORDER = [
+  CancellationReason.Client,
+  CancellationReason.Professional,
+  CancellationReason.Bumped,
+  CancellationReason.NoShow,
+];
+
+function cancellationsByReason(appts: Appointment[]): CancellationReasonMetricsDto[] {
+  const cancelled = appts.filter((a) => a.status === AppointmentStatus.Cancelled);
+  const rows: CancellationReasonMetricsDto[] = CANCELLATION_ORDER.map((reason) => ({
+    reason,
+    count: cancelled.filter((a) => a.cancellationReason === reason).length,
+  }));
+  rows.push({ reason: 'other', count: cancelled.filter((a) => !a.cancellationReason).length });
+  return rows.filter((r) => r.count > 0);
+}
+
+function bookingChannels(appts: Appointment[]): BookingChannelsDto {
+  const count = (via: CreatedVia) => appts.filter((a) => a.createdVia === via).length;
+  return {
+    online: count(CreatedVia.ClientSelf),
+    manual: count(CreatedVia.Professional),
+    walkIn: count(CreatedVia.WalkIn),
+  };
 }
 
 /** Días (00:00 en la TZ) desde el inicio del período hasta el día en que se corta. */

@@ -4,7 +4,7 @@ import { ComercioOwnerGuard } from '@/common/guards/comercio-owner.guard';
 import { CurrentAccount } from '@/common/decorators/current-account.decorator';
 import { CurrentComercio } from '@/common/decorators/current-comercio.decorator';
 import { MetricsService } from './metrics.service';
-import { ComercioTeamMetricsDto, MetricsQueryDto, MetricsRange } from './dto/metrics.dto';
+import { ComercioTeamMetricsDto, MetricsPeriodQueryDto, MetricsRange } from './dto/metrics.dto';
 
 /**
  * Métricas del equipo para el dueño del comercio. La plata de cada profesional solo viaja si
@@ -25,7 +25,7 @@ export class ComercioMetricsController {
   team(
     @CurrentComercio() comercioId: string,
     @CurrentAccount('sub') accountId: string,
-    @Query() query: MetricsQueryDto,
+    @Query() query: MetricsPeriodQueryDto,
   ): Promise<ComercioTeamMetricsDto> {
     return this.metrics.getComercioTeam(
       comercioId,

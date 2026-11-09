@@ -26,6 +26,11 @@ export class MetricsController {
     @CurrentTenant() tenantId: string,
     @Query() query: MetricsQueryDto,
   ): Promise<MetricsOverviewDto> {
-    return this.metrics.getOverview(tenantId, query.range ?? MetricsRange.Week, query.offset ?? 0);
+    return this.metrics.getOverview(
+      tenantId,
+      query.range ?? MetricsRange.Week,
+      query.offset ?? 0,
+      query.comercioId,
+    );
   }
 }
