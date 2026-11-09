@@ -164,4 +164,12 @@ export class Membership extends BaseEntity {
   @ApiPropertyOptional({ type: String, nullable: true })
   @Column({ name: 'waiting_room_note', type: 'text', nullable: true })
   waitingRoomNote!: string | null;
+
+  /**
+   * Si el dueño del comercio puede ver lo que el profesional cobra y factura en "Métricas del
+   * equipo". Lo decide el profesional; por defecto NO (el comercio solo ve la actividad).
+   */
+  @ApiProperty({ type: Boolean, default: false })
+  @Column({ name: 'share_income_with_comercio', type: 'boolean', default: false })
+  shareIncomeWithComercio!: boolean;
 }

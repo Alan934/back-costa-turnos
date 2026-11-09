@@ -217,6 +217,17 @@ export class UpdateMembershipDto {
   @ValidateNested()
   @Type(() => WaitingRoomWhatsappMessagesDto)
   waitingRoomWhatsappMessages?: WaitingRoomWhatsappMessagesDto | null;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    example: false,
+    description:
+      'Compartir con el dueño del comercio lo que cobrás y facturás (Métricas del equipo). ' +
+      'false (default) = el comercio solo ve tu actividad, nunca tu plata.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  shareIncomeWithComercio?: boolean;
 }
 
 export class InviteProfessionalDto {

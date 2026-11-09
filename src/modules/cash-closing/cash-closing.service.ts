@@ -9,6 +9,7 @@ import { Service } from '@/modules/catalog/entities/service.entity';
 import { Person } from '@/modules/identity/entities/person.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { MetricsRange } from '@/modules/metrics/dto/metrics.dto';
+import { resolvePeriod } from '@/modules/metrics/metrics-period';
 import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { CashClosingDto, PendingCashDto, PendingCompletionDto } from './dto/cash-closing.dto';
 
@@ -124,15 +125,13 @@ export class CashClosingService {
     return { pendingCompletion, pendingCash, pendingCashCents, collected };
   }
 
-  /** Inicio del período (week = 7 días, month = 30 días) en la zona del profesional. */
+  /**
+   * Inicio del período en la zona del profesional: semana de lunes a domingo o mes
+   * calendario, igual que en Métricas (así los totales de las dos pantallas coinciden).
+   */
   private async periodStart(tenantId: string, range: MetricsRange): Promise<Date> {
     const professional = await this.professionals.findOne({ where: { id: tenantId } });
     const tz = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
-    const days = range === MetricsRange.Month ? 30 : 7;
-    return DateTime.now()
-      .setZone(tz)
-      .minus({ days: days - 1 })
-      .startOf('day')
-      .toJSDate();
+    return resolvePeriod(DateTime.now().setZone(tz), range).start.toJSDate();
   }
 }
