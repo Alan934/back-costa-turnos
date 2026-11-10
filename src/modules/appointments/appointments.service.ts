@@ -1128,8 +1128,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
     // Si el profesional pasó directo a "Atender" sin llamarlo antes, el cliente que
     // espera con el celular en el bolsillo se entera igual.
-    if (!wasCalled) {
-      await this.notifier.notifyCalled(started, await this.staffName(started.staffId));
+    const staffName = await this.staffName(started.staffId);
+    if (wasCalled) {
+      // Ya se acercó: el "¡Es tu turno!" que quedó fijo en su bandeja se reemplaza por uno tranquilo.
+      await this.notifier.notifyServing(started, staffName);
+    } else {
+      await this.notifier.notifyCalled(started, staffName);
     }
     return started;
   }
