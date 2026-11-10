@@ -16,7 +16,14 @@ export interface PushPayload {
   tag?: string;
   /** Vibración en ms (Android). */
   vibrate?: number[];
+  /** Sin sonido ni vibración, y no queda fija: para reemplazar un aviso anterior con la misma `tag`. */
+  silent?: boolean;
+  /** Segundos que el servicio de push guarda el aviso si el celular está apagado o sin datos. */
+  ttl?: number;
 }
+
+/** Un aviso viejo vale poco ("sos el siguiente" de hace media hora): por defecto 10 minutos. */
+const DEFAULT_TTL_SECONDS = 60 * 10;
 
 export interface BrowserSubscription {
   endpoint: string;
@@ -129,14 +136,17 @@ export class PushService implements OnModuleInit {
   ): Promise<number> {
     if (!this.cfg.enabled) return 0;
     const targets = await this.subs.find({ where });
+    // `ttl` es para el servicio de push, no para el service worker: no viaja en el cuerpo.
+    const { ttl, ...body } = payload;
+    const message = JSON.stringify(body);
     let delivered = 0;
     await Promise.all(
       targets.map(async (t) => {
         try {
           await webpush.sendNotification(
             { endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } },
-            JSON.stringify(payload),
-            { TTL: 60 * 30, urgency: 'high' },
+            message,
+            { TTL: ttl ?? DEFAULT_TTL_SECONDS, urgency: 'high' },
           );
           delivered++;
         } catch (err) {

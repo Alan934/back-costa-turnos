@@ -337,6 +337,7 @@ export class ComerciosService {
       waitingRoomStatus?: WaitingRoomStatus;
       waitingRoomNote?: string | null;
       waitingRoomWhatsappMessages?: WaitingRoomWhatsappMessagesDto | null;
+      shareIncomeWithComercio?: boolean;
     },
   ): Promise<Membership> {
     const membership = await this.getMembershipById(membershipId);
@@ -376,6 +377,9 @@ export class ComerciosService {
     }
     if (dto.waitingRoomStatus !== undefined) {
       membership.waitingRoomStatus = dto.waitingRoomStatus;
+    }
+    if (dto.shareIncomeWithComercio !== undefined) {
+      membership.shareIncomeWithComercio = dto.shareIncomeWithComercio;
     }
     if (dto.waitingRoomNote !== undefined) {
       // "" o null => limpia la nota de la pantalla pública.

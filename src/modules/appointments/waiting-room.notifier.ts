@@ -84,6 +84,24 @@ export class WaitingRoomNotifier {
       url: `/sala/t/${appointment.publicToken}`,
       tag: 'sala-llamado',
       vibrate: [300, 150, 300, 150, 300],
+      // Si el celular estaba sin señal, a los 3 minutos el llamado ya no tiene sentido.
+      ttl: 180,
+    });
+  }
+
+  /**
+   * El profesional empezó a atender a quien ya había llamado. Reemplaza (misma `tag`) al "¡Es tu
+   * turno!" que queda fijo en la bandeja, para que no siga ahí pidiendo que se acerque.
+   */
+  async notifyServing(appointment: Appointment, staffName: string): Promise<number> {
+    if (!appointment.publicToken) return 0;
+    return this.push.sendToAppointment(appointment.id, {
+      title: 'Te están atendiendo',
+      body: `${staffName} ya te está atendiendo.`,
+      url: `/sala/t/${appointment.publicToken}`,
+      tag: 'sala-llamado',
+      silent: true,
+      ttl: 180,
     });
   }
 }
