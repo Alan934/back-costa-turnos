@@ -10,7 +10,9 @@ import {
   Matches,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { DepositMode } from '@/common/enums';
 import { IsEnum } from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
@@ -61,7 +63,25 @@ export class OnboardProfessionalDto {
   address?: string;
 }
 
+export class NotificationPrefsDto {
+  @ApiPropertyOptional({ type: Boolean, description: 'Avisos por email (default: activado)' })
+  @IsOptional()
+  @IsBoolean()
+  email?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean, description: 'Avisos en el celular (default: activado)' })
+  @IsOptional()
+  @IsBoolean()
+  push?: boolean;
+}
+
 export class UpdateProfessionalDto {
+  @ApiPropertyOptional({ type: NotificationPrefsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NotificationPrefsDto)
+  notificationPrefs?: NotificationPrefsDto;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

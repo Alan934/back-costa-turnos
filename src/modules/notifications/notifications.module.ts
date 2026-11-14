@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IdentityModule } from '@/modules/identity/identity.module';
+import { PushModule } from '@/modules/push/push.module';
 import { MailConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
@@ -21,6 +22,7 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
     TypeOrmModule.forFeature([Notification, Professional, Appointment]),
     BullModule.registerQueue({ name: NOTIFICATIONS_QUEUE }),
     IdentityModule,
+    PushModule,
   ],
   controllers: [NotificationsController],
   providers: [

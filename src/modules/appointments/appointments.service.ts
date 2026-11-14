@@ -43,7 +43,10 @@ import { SubscriptionsService } from '@/modules/subscriptions/subscriptions.serv
 import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
-import { NotificationsService } from '@/modules/notifications/notifications.service';
+import {
+  formatWhen,
+  NotificationsService,
+} from '@/modules/notifications/notifications.service';
 import { PaymentsService } from '@/modules/payments/payments.service';
 import { AppointmentConfirmer } from '@/modules/payments/ports/appointment-confirmer.port';
 import { Appointment } from './entities/appointment.entity';
@@ -2201,6 +2204,36 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         paymentNote,
         manageToken: appointment.manageToken,
       });
+
+      // Reservó el cliente por su cuenta: se le avisa al profesional (si lo cargó él mismo
+      // desde la agenda, ya lo sabe).
+      if (appointment.createdVia === CreatedVia.ClientSelf) {
+        const person = await this.persons.findById(appointment.personId);
+        const timezone = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
+        const whenText = formatWhen(appointment.startAt, timezone);
+        const clientName = person?.fullName ?? 'Un cliente';
+        await this.notifications.notifyProfessional({
+          professionalId: appointment.professionalId,
+          type: NotificationType.ProBooked,
+          payload: {
+            appointmentId: appointment.id,
+            clientName,
+            clientPhone: person?.phone ?? null,
+            clientEmail: person?.email ?? null,
+            serviceName: service.name,
+            professionalName: staffMember?.displayName ?? null,
+            whenText,
+            isProvisional: appointment.isProvisional,
+            paymentNote: paymentNote ?? null,
+          },
+          push: {
+            title: 'Nuevo turno',
+            body: `${clientName} · ${service.name} · ${whenText}`,
+            url: '/app/agenda',
+            tag: `turno-${appointment.id}`,
+          },
+        });
+      }
     } catch (err) {
       this.logger.warn(`Aviso de turno ${appointment.id} no encolado: ${String(err)}`);
     }

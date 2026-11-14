@@ -139,6 +139,34 @@ export class SmtpEmailSender implements NotificationSender {
           subject: 'Estado de tu suscripción',
           text: 'Hay novedades sobre el estado de tu suscripción. Ingresá para revisarlas.',
         };
+      case NotificationType.ProBooked:
+      case NotificationType.ProCancelled: {
+        const booked = n.type === NotificationType.ProBooked;
+        const who = str(p.clientName) || 'Un cliente';
+        const contact = [str(p.clientPhone), str(p.clientEmail)].filter(Boolean).join(' · ');
+        return {
+          subject: booked
+            ? `Nuevo turno: ${who}${str(p.whenText) ? `, ${str(p.whenText)}` : ''}`
+            : `Turno cancelado: ${who}${str(p.whenText) ? `, ${str(p.whenText)}` : ''}`,
+          text: [
+            booked ? `${who} reservó un turno.` : `${who} canceló su turno. El horario quedó libre.`,
+            '',
+            [
+              str(p.serviceName) && `Servicio: ${str(p.serviceName)}`,
+              str(p.whenText) && `Cuándo: ${str(p.whenText)}`,
+              str(p.professionalName) && `Con: ${str(p.professionalName)}`,
+              contact && `Contacto: ${contact}`,
+              booked && p.isProvisional === true && 'Turno provisional (sin seña).',
+              booked && str(p.paymentNote),
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            '',
+            `Ver la agenda: ${this.frontUrl}/app/agenda`,
+            `(Podés apagar estos avisos en Configuración: ${this.frontUrl}/app/configuracion)`,
+          ].join('\n'),
+        };
+      }
       case NotificationType.Rescheduled: {
         const who = str(p.clientName) || 'Un cliente';
         const oldAt = str(p.oldStartAt);

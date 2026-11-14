@@ -9,10 +9,12 @@ import { In, Repository } from 'typeorm';
 import {
   AppointmentStatus,
   CancellationReason,
-  NotificationChannel,
   NotificationType,
 } from '@/common/enums';
-import { NotificationsService } from '@/modules/notifications/notifications.service';
+import {
+  formatWhen,
+  NotificationsService,
+} from '@/modules/notifications/notifications.service';
 import { WaitlistService } from '@/modules/waitlist/waitlist.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
@@ -149,6 +151,35 @@ export class MeService {
     });
 
     const maps = await this.loadRefs([appt]);
+
+    // Avisa al profesional que el cliente canceló (y que el horario quedó libre).
+    const owner = await this.persons.findOne({ where: { id: appt.personId } });
+    const clientName = owner?.fullName ?? 'Un cliente';
+    const serviceName = appt.serviceId ? maps.services.get(appt.serviceId)?.name : undefined;
+    const whenText = formatWhen(
+      appt.startAt,
+      professional?.timezone ?? 'America/Argentina/Buenos_Aires',
+    );
+    await this.notifications.notifyProfessional({
+      professionalId: appt.professionalId,
+      type: NotificationType.ProCancelled,
+      payload: {
+        appointmentId: appt.id,
+        clientName,
+        clientPhone: owner?.phone ?? null,
+        clientEmail: owner?.email ?? null,
+        serviceName: serviceName ?? null,
+        professionalName: maps.staff.get(appt.staffId)?.displayName ?? null,
+        whenText,
+      },
+      push: {
+        title: 'Turno cancelado',
+        body: `${clientName} canceló${serviceName ? ` · ${serviceName}` : ''} · ${whenText}`,
+        url: '/app/agenda',
+        tag: `turno-${appt.id}`,
+      },
+    });
+
     return this.toDto(appt, maps);
   }
 
@@ -249,15 +280,23 @@ export class MeService {
 
     // Avisa al profesional por correo que el cliente movió el turno.
     const owner = await this.persons.findOne({ where: { id: appt.personId } });
-    await this.notifications.enqueue({
+    const proTimezone = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
+    const newWhen = formatWhen(appt.startAt, proTimezone);
+    await this.notifications.notifyProfessional({
       professionalId: appt.professionalId,
-      channel: NotificationChannel.Email,
       type: NotificationType.Rescheduled,
       payload: {
         appointmentId: appt.id,
         clientName: owner?.fullName ?? '',
-        oldStartAt,
-        newStartAt: appt.startAt.toISOString(),
+        // Fechas ya escritas en la hora local del profesional (antes iban en ISO/UTC crudo).
+        oldStartAt: formatWhen(new Date(oldStartAt), proTimezone),
+        newStartAt: newWhen,
+      },
+      push: {
+        title: 'Turno reprogramado',
+        body: `${owner?.fullName ?? 'Un cliente'} lo pasó al ${newWhen}`,
+        url: '/app/agenda',
+        tag: `turno-${appt.id}`,
       },
     });
 

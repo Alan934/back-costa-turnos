@@ -92,6 +92,14 @@ export class Professional extends BaseEntity {
   @Column({ name: 'public_page_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
   publicPageSettings!: PublicPageSettings;
 
+  /**
+   * Preferencias de avisos al profesional (reserva nueva, cancelación, reprogramación).
+   * Un canal está activo salvo que figure explícitamente en false: `{}` = todo activado.
+   */
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @Column({ name: 'notification_prefs', type: 'jsonb', default: () => "'{}'::jsonb" })
+  notificationPrefs!: { email?: boolean; push?: boolean };
+
   // ---- Conexion MercadoPago (OAuth marketplace): cobra las señas/turnos a su cuenta ----
   /** user_id de MercadoPago del profesional (collector). */
   @ApiPropertyOptional({ type: String, nullable: true })

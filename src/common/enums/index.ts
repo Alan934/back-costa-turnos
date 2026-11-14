@@ -203,6 +203,10 @@ export enum NotificationType {
   Rescheduled = 'rescheduled',
   /** Confirmación al cliente de un turno recién reservado. */
   Booked = 'booked',
+  /** Aviso al PROFESIONAL: un cliente reservó un turno desde la página pública. */
+  ProBooked = 'pro_booked',
+  /** Aviso al PROFESIONAL: un cliente canceló su turno. */
+  ProCancelled = 'pro_cancelled',
 }
 
 export enum NotificationStatus {

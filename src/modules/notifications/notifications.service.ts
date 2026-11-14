@@ -4,6 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { NotificationChannel, NotificationType } from '@/common/enums';
+import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { PushService } from '@/modules/push/push.service';
 import { Notification } from './entities/notification.entity';
 import { NOTIFICATIONS_QUEUE, NotificationJobData } from './notifications.constants';
 
@@ -76,6 +78,9 @@ export class NotificationsService {
     private readonly notifications: Repository<Notification>,
     @InjectQueue(NOTIFICATIONS_QUEUE)
     private readonly queue: Queue<NotificationJobData>,
+    @InjectRepository(Professional)
+    private readonly professionals: Repository<Professional>,
+    private readonly push: PushService,
   ) {}
 
   /**
@@ -156,6 +161,43 @@ export class NotificationsService {
       }
     } catch (err) {
       this.logger.warn(`No se pudieron encolar los avisos del turno: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Aviso al PROFESIONAL de algo que hizo un cliente (reservó, canceló, reprogramó): email a
+   * su cuenta y notificación en los dispositivos donde activó los avisos. Respeta sus
+   * preferencias (`notificationPrefs`: un canal sale salvo que esté en false).
+   *
+   * Nunca lanza: un aviso fallido no debe romper la acción del cliente que lo disparó.
+   */
+  async notifyProfessional(input: {
+    professionalId: string;
+    type: NotificationType;
+    payload: Record<string, unknown>;
+    push: { title: string; body: string; url: string; tag?: string };
+  }): Promise<void> {
+    try {
+      const professional = await this.professionals.findOne({
+        where: { id: input.professionalId },
+        select: { id: true, accountId: true, notificationPrefs: true },
+      });
+      if (!professional) return;
+      const prefs = professional.notificationPrefs ?? {};
+
+      if (prefs.email !== false) {
+        await this.enqueue({
+          professionalId: professional.id,
+          channel: NotificationChannel.Email,
+          type: input.type,
+          payload: input.payload,
+        });
+      }
+      if (prefs.push !== false) {
+        await this.push.sendToAccount(professional.accountId, input.push);
+      }
+    } catch (err) {
+      this.logger.warn(`No se pudo avisar al profesional (${input.type}): ${String(err)}`);
     }
   }
 
