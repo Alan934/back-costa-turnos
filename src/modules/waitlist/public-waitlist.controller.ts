@@ -1,3 +1,4 @@
+import { PHONE_REGEX } from '@/common/decorators/phone.decorator';
 import { Body, Controller, HttpCode, HttpStatus, Param, Post, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiPropertyOptional, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -88,6 +89,10 @@ export class PublicWaitlistController {
     // Se identifica SOLO por email (no por teléfono): el aviso sale al email de la persona, y
     // emparejar por teléfono podía caer en una ficha sin email y el aviso no llegaba a nadie.
     const person = await this.persons.findOrCreate({ fullName: dto.fullName, email: dto.email });
+    // El teléfono no identifica, pero se guarda (si la ficha no tenía) para que el profesional
+    // pueda escribirle por WhatsApp desde su lista de espera. Uno mal escrito se ignora.
+    const phone = (dto.phone ?? '').replace(/\D/g, '');
+    if (PHONE_REGEX.test(phone)) await this.persons.fillMissingPhone(person, phone);
     await this.waitlist.joinPublic({
       personId: person.id,
       professionalIds: memberships.map((m) => m.professionalId),

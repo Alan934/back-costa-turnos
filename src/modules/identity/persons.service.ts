@@ -54,6 +54,13 @@ export class PersonsService {
     return this.persons.save(person);
   }
 
+  /** Completa el celular de una persona que no tenía ninguno (nunca pisa uno existente). */
+  async fillMissingPhone(person: Person, phone: string): Promise<void> {
+    if (person.phone) return;
+    await this.persons.update({ id: person.id }, { phone });
+    person.phone = phone;
+  }
+
   async linkAccount(personId: string, accountId: string): Promise<void> {
     await this.persons.update({ id: personId }, { accountId });
   }

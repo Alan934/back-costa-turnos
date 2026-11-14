@@ -1,7 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
-import { NotificationChannel, NotificationType, WaitlistStatus } from '@/common/enums';
+import { DataSource, In, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import {
+  MembershipStatus,
+  NotificationChannel,
+  NotificationType,
+  WaitlistStatus,
+} from '@/common/enums';
+import { Membership } from '@/modules/comercios/entities/membership.entity';
+import { Person } from '@/modules/identity/entities/person.entity';
 import {
   formatWhen,
   NotificationsService,
@@ -10,7 +17,7 @@ import { Comercio } from '@/modules/comercios/entities/comercio.entity';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { Service } from '@/modules/catalog/entities/service.entity';
 import { WaitlistEntry } from './entities/waitlist-entry.entity';
-import { CreateWaitlistDto } from './dto/waitlist.dto';
+import { CreateWaitlistDto, WaitlistItemDto } from './dto/waitlist.dto';
 
 /**
  * Instante (UTC) en que empieza el día 'YYYY-MM-DD' en una zona horaria IANA. Se calcula el
@@ -64,11 +71,55 @@ export class WaitlistService {
     private readonly dataSource: DataSource,
   ) {}
 
-  list(tenantId: string): Promise<WaitlistEntry[]> {
-    return this.entries.find({
-      where: { professionalId: tenantId },
-      order: { createdAt: 'ASC' },
+  /**
+   * Lista de espera vigente del profesional: quienes esperan (o ya fueron avisados) para un día
+   * que todavía no terminó, con nombre/contacto y servicio para poder llamarlos o darles turno.
+   * Ordenada por día y, dentro del día, por orden de llegada.
+   */
+  async list(tenantId: string): Promise<WaitlistItemDto[]> {
+    const entries = await this.entries.find({
+      where: {
+        professionalId: tenantId,
+        status: In([WaitlistStatus.Waiting, WaitlistStatus.Notified]),
+        desiredTo: MoreThan(new Date()),
+      },
+      relations: { person: true, service: true },
+      order: { desiredFrom: 'ASC', createdAt: 'ASC' },
     });
+    return entries.map((e) => ({
+      id: e.id,
+      status: e.status,
+      desiredFrom: e.desiredFrom.toISOString(),
+      desiredTo: e.desiredTo.toISOString(),
+      createdAt: e.createdAt.toISOString(),
+      personId: e.personId,
+      fullName: e.person?.fullName ?? 'Cliente',
+      phone: e.person?.phone ?? null,
+      email: e.person?.email ?? null,
+      serviceId: e.serviceId,
+      serviceName: e.service?.name ?? null,
+    }));
+  }
+
+  /**
+   * La persona consiguió turno (lo reservó ella o se lo cargó el profesional): sus entradas
+   * para ese día dejan de estar "esperando". Nunca lanza.
+   */
+  async markBooked(input: { professionalId: string; personId: string; startAt: Date }) {
+    try {
+      await this.entries.update(
+        {
+          professionalId: input.professionalId,
+          personId: input.personId,
+          status: In([WaitlistStatus.Waiting, WaitlistStatus.Notified]),
+          desiredFrom: LessThanOrEqual(input.startAt),
+          desiredTo: MoreThan(input.startAt),
+        },
+        { status: WaitlistStatus.Converted },
+      );
+    } catch (err) {
+      this.logger.warn(`Lista de espera: no se pudo marcar como reservada: ${String(err)}`);
+    }
   }
 
   create(tenantId: string, dto: CreateWaitlistDto): Promise<WaitlistEntry> {
@@ -212,17 +263,67 @@ export class WaitlistService {
     return entry;
   }
 
-  /** Marca como notificada y encola un aviso al cliente (hueco disponible). */
+  /**
+   * El profesional avisa a mano que hay lugar ese día (por ejemplo, se le liberó un hueco que
+   * no pasó por una cancelación del sistema). Le llega el mismo email que el aviso automático,
+   * con el link a su página para reservar.
+   */
   async notify(tenantId: string, id: string): Promise<WaitlistEntry> {
     const entry = await this.findById(tenantId, id);
+    const person = await this.dataSource
+      .getRepository(Person)
+      .findOne({ where: { id: entry.personId } });
+    if (!person?.email) {
+      throw new BadRequestException(
+        'Esta persona no dejó email: avisale por teléfono o WhatsApp.',
+      );
+    }
     entry.status = WaitlistStatus.Notified;
     const saved = await this.entries.save(entry);
+
+    const professional = await this.dataSource
+      .getRepository(Professional)
+      .findOne({ where: { id: tenantId } });
+    // Página donde reservar: la del comercio propio si lo tiene, si no la primera activa.
+    const membership = await this.dataSource
+      .getRepository(Membership)
+      .createQueryBuilder('m')
+      .innerJoinAndSelect('m.comercio', 'c')
+      .where('m.professional_id = :tenantId', { tenantId })
+      .andWhere('m.status = :active', { active: MembershipStatus.Active })
+      .orderBy('c.is_personal', 'DESC')
+      .addOrderBy('m.created_at', 'ASC')
+      .getOne();
+    const comercio = membership?.comercio;
+    const timezone =
+      comercio?.timezone ?? professional?.timezone ?? 'America/Argentina/Buenos_Aires';
+    const service = entry.serviceId
+      ? await this.dataSource.getRepository(Service).findOne({ where: { id: entry.serviceId } })
+      : null;
+    const dayText = new Intl.DateTimeFormat('es-AR', {
+      timeZone: timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(entry.desiredFrom);
+
     await this.notifications.enqueue({
       professionalId: tenantId,
       personId: entry.personId,
       channel: NotificationChannel.Email,
       type: NotificationType.Waitlist,
-      payload: { waitlistEntryId: entry.id },
+      payload: {
+        waitlistEntryId: entry.id,
+        whenText: dayText,
+        placeName: comercio?.name ?? professional?.businessName ?? null,
+        serviceName: service?.name ?? null,
+        bookPath: comercio?.slug
+          ? `/r/${comercio.slug}` +
+            (entry.serviceId && membership
+              ? `?servicio=${entry.serviceId}&pro=${membership.id}`
+              : '')
+          : null,
+      },
     });
     return saved;
   }

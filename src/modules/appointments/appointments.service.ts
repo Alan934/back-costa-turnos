@@ -2181,6 +2181,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     service: Service,
     paymentNote?: string,
   ): Promise<void> {
+    // Si esa persona estaba en la lista de espera para ese día, ya consiguió turno.
+    await this.waitlist?.markBooked({
+      professionalId: appointment.professionalId,
+      personId: appointment.personId,
+      startAt: appointment.startAt,
+    });
     try {
       const [professional, comercio, staffMember] = await Promise.all([
         this.professionals.findOne({ where: { id: appointment.professionalId } }),
