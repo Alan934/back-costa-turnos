@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { Comercio } from '@/modules/comercios/entities/comercio.entity';
+import { Person } from '@/modules/identity/entities/person.entity';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig, SubscriptionConfig } from '@/config/configuration';
 import { SubscriptionStatus } from '@/common/enums';
@@ -16,9 +18,12 @@ import { Staff } from './entities/staff.entity';
 import {
   CreateStaffDto,
   OnboardProfessionalDto,
+  SlugAvailabilityDto,
   UpdateProfessionalDto,
   UpdateStaffDto,
 } from './dto/professional.dto';
+
+const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 @Injectable()
 export class ProfessionalsService {
@@ -43,8 +48,12 @@ export class ProfessionalsService {
     if (existing) {
       throw new ConflictException('Esta cuenta ya tiene un professional');
     }
-    const slugTaken = await this.professionals.findOne({ where: { slug: dto.slug } });
-    if (slugTaken) throw new ConflictException('El slug ya esta en uso');
+    // El slug se comparte con los comercios (/r/:slug). Sin chequear también ahí, un
+    // profesional que elegía el slug de un comercio AJENO quedaba como miembro activo de ese
+    // comercio (ensurePersonalComercio reutiliza el comercio que encuentra por slug).
+    if ((await this.takenSlugs([dto.slug])).has(dto.slug)) {
+      throw new ConflictException({ message: 'El slug ya esta en uso', error: 'slug_taken' });
+    }
 
     const timezone = dto.timezone ?? this.config.getOrThrow<AppConfig>('app').defaultTimezone;
 
@@ -59,11 +68,20 @@ export class ProfessionalsService {
         }),
       );
 
+      // Quien atiende es la PERSONA, no el negocio: el integrante por defecto lleva su nombre
+      // (si no hay uno usable, p. ej. cuenta de Google sin nombre, cae al del negocio).
+      const person = await manager.findOne(Person, {
+        where: { accountId },
+        order: { id: 'ASC' },
+      });
+      const personName = person?.fullName?.trim();
+      const displayName = personName && !personName.includes('@') ? personName : dto.businessName;
+
       await manager.save(
         manager.create(Staff, {
           professionalId: professional.id,
           accountId,
-          displayName: dto.businessName,
+          displayName,
           isActive: true,
         }),
       );
@@ -87,6 +105,38 @@ export class ProfessionalsService {
 
       return professional;
     });
+  }
+
+  /** De una lista de slugs, cuáles ya usa algún profesional o comercio. */
+  private async takenSlugs(slugs: string[]): Promise<Set<string>> {
+    if (slugs.length === 0) return new Set();
+    const [pros, comercios] = await Promise.all([
+      this.professionals.find({ where: { slug: In(slugs) }, select: { slug: true } }),
+      this.dataSource
+        .getRepository(Comercio)
+        .find({ where: { slug: In(slugs) }, select: { slug: true } }),
+    ]);
+    return new Set([...pros, ...comercios].map((r) => r.slug));
+  }
+
+  /**
+   * Disponibilidad de un enlace público (para avisar mientras se escribe, antes de enviar).
+   * Si está tomado, propone hasta 3 alternativas libres (`slug-2`, `slug-3`, ...).
+   */
+  async checkSlug(raw: string): Promise<SlugAvailabilityDto> {
+    const slug = raw.trim().toLowerCase();
+    if (!SLUG_REGEX.test(slug) || slug.length > 60) {
+      return { slug, valid: false, available: false, suggestions: [] };
+    }
+    const candidates = Array.from({ length: 8 }, (_, i) => `${slug}-${i + 2}`);
+    const taken = await this.takenSlugs([slug, ...candidates]);
+    const available = !taken.has(slug);
+    return {
+      slug,
+      valid: true,
+      available,
+      suggestions: available ? [] : candidates.filter((c) => !taken.has(c)).slice(0, 3),
+    };
   }
 
   async findById(id: string): Promise<Professional> {

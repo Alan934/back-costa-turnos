@@ -16,6 +16,26 @@ import { IsEnum } from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 import type { PublicPageSettings } from '../entities/professional.entity';
 
+/** Respuesta de GET /professionals/slug-availability. */
+export class SlugAvailabilityDto {
+  @ApiProperty({ example: 'mi-peluqueria', description: 'slug consultado (normalizado)' })
+  slug!: string;
+
+  @ApiProperty({ type: Boolean, description: 'false si no es kebab-case (a-z, 0-9, guiones)' })
+  valid!: boolean;
+
+  @ApiProperty({ type: Boolean, description: 'true si nadie lo usa (profesional ni comercio)' })
+  available!: boolean;
+
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    example: ['mi-peluqueria-2', 'mi-peluqueria-3'],
+    description: 'alternativas libres cuando está tomado',
+  })
+  suggestions!: string[];
+}
+
 export class OnboardProfessionalDto {
   @ApiProperty({ example: 'Peluqueria Mi Pueblo' })
   @IsString()

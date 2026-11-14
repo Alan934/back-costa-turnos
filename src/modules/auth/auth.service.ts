@@ -268,7 +268,18 @@ export class AuthService {
       accountId: account.id,
     });
 
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
+  }
+
+  /**
+   * Manda el código de verificación de email apenas se crea la cuenta, sin esperar a que la
+   * persona lo pida desde el aviso. NO bloquea ni hace fallar el registro: si el mail no
+   * sale, queda el aviso "Verificá tu email" para reintentarlo.
+   */
+  private sendWelcomeVerification(account: Account): void {
+    if (account.emailVerifiedAt) return; // reclamó con código o vino por Google
+    void this.requestCode(account.email, VerificationPurpose.EmailVerify).catch(() => undefined);
   }
 
   /**
@@ -280,8 +291,8 @@ export class AuthService {
     // El slug se valida ANTES de crear la cuenta: si se chequeaba recién en el onboard, un
     // slug tomado dejaba la cuenta creada a medias (sin negocio) y el reintento fallaba con
     // "ya existe una cuenta con ese email".
-    const slugTaken = await this.professionals.findOne({ where: { slug: dto.slug } });
-    if (slugTaken) {
+    const slugCheck = await this.professionalsService.checkSlug(dto.slug);
+    if (!slugCheck.available) {
       throw new ConflictException({ message: 'El slug ya esta en uso', error: 'slug_taken' });
     }
     const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
@@ -313,6 +324,7 @@ export class AuthService {
       address: dto.address,
     });
 
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
   }
 
@@ -326,6 +338,7 @@ export class AuthService {
     const comercio = await this.comercios.createComercialWithComercio(dto);
     const account = await this.accounts.findById(comercio.accountId!);
     if (!account) throw new BadRequestException('No se pudo crear la cuenta del comercial');
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
   }
 
