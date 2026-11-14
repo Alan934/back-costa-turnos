@@ -226,6 +226,9 @@ export class AuthMeDto {
   })
   personId?: string;
 
+  @ApiPropertyOptional({ description: 'nombre y apellido de la persona de la cuenta' })
+  fullName?: string;
+
   @ApiPropertyOptional({ format: 'uuid' })
   staffId?: string;
 

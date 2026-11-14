@@ -143,7 +143,7 @@ export class AuthService {
     // lo expone /auth/me). Permite al front filtrar de forma fiable al dueño de su
     // propia cartera sin depender del email.
     const person = await this.persons.findByAccountId(accountId);
-    return { ...payload, personId: person?.id };
+    return { ...payload, personId: person?.id, fullName: person?.fullName ?? undefined };
   }
 
   /**
@@ -277,6 +277,13 @@ export class AuthService {
    * El token resultante ya trae rol professional y su comercio personal.
    */
   async registerProfessional(dto: RegisterProfessionalDto): Promise<IssuedTokens> {
+    // El slug se valida ANTES de crear la cuenta: si se chequeaba recién en el onboard, un
+    // slug tomado dejaba la cuenta creada a medias (sin negocio) y el reintento fallaba con
+    // "ya existe una cuenta con ese email".
+    const slugTaken = await this.professionals.findOne({ where: { slug: dto.slug } });
+    if (slugTaken) {
+      throw new ConflictException({ message: 'El slug ya esta en uso', error: 'slug_taken' });
+    }
     const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
@@ -416,11 +423,12 @@ export class AuthService {
         // Si la cuenta tenía password pero NUNCA se verificó el email, quien la creó pudo no
         // ser el dueño del mail (pre-registro malicioso). Google sí verifica el email, así que
         // se lo vincula pero se descartan la password y las sesiones previas.
-        if (!account.emailVerifiedAt && account.passwordHash) {
+        // (Se calcula ANTES de limpiar la password: si no, nunca se cerraban las sesiones.)
+        const wiped = !account.emailVerifiedAt && !!account.passwordHash;
+        if (wiped) {
           account.passwordHash = null;
           account.refreshTokenHash = null;
         }
-        const wiped = !account.emailVerifiedAt && !!account.passwordHash;
         account.googleId = profile.googleId;
         account.isClaimed = true;
         account.emailVerifiedAt ??= new Date();
