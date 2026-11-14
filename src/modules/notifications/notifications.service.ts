@@ -32,6 +32,8 @@ export interface AppointmentNoticeInput {
   isProvisional?: boolean;
   /** Frase sobre el pago ("Ya abonaste $ 2.000.", "Abonás en el local."). */
   paymentNote?: string | null;
+  /** Token del link "gestionar mi turno" (/turno/:token), si el turno lo tiene. */
+  manageToken?: string | null;
   /** false = solo reprograma el recordatorio (p. ej. al mover el turno). */
   confirmation?: boolean;
 }
@@ -134,6 +136,7 @@ export class NotificationsService {
         address: input.address ?? null,
         isProvisional: input.isProvisional ?? false,
         paymentNote: input.paymentNote ?? null,
+        manageToken: input.manageToken ?? null,
       };
       const base = {
         professionalId: input.professionalId,

@@ -32,6 +32,7 @@ import { VerificationTokenService } from './verification-token.service';
 import {
   AuthMeDto,
   ClaimAccountDto,
+  LoginCodeDto,
   LoginDto,
   RegisterComercialDto,
   RegisterDto,
@@ -143,7 +144,12 @@ export class AuthService {
     // lo expone /auth/me). Permite al front filtrar de forma fiable al dueño de su
     // propia cartera sin depender del email.
     const person = await this.persons.findByAccountId(accountId);
-    return { ...payload, personId: person?.id, fullName: person?.fullName ?? undefined };
+    return {
+      ...payload,
+      personId: person?.id,
+      fullName: person?.fullName ?? undefined,
+      phone: person?.phone ?? undefined,
+    };
   }
 
   /**
@@ -363,6 +369,37 @@ export class AuthService {
     this.assertActive(account);
 
     await this.redis.del(failKey).catch(() => undefined);
+    return this.issueAndPersist(account);
+  }
+
+  /**
+   * Ingreso SIN contraseña, paso 1: manda un código de un solo uso al email. Solo si la
+   * cuenta existe y no está bloqueada; la respuesta del endpoint es siempre la misma, así
+   * que no revela si un email está registrado.
+   */
+  async requestLoginCode(email: string): Promise<void> {
+    const account = await this.accounts.findByEmail(email);
+    if (!account || account.status === AccountStatus.Blocked) return;
+    await this.requestCode(email, VerificationPurpose.Otp);
+  }
+
+  /**
+   * Ingreso SIN contraseña, paso 2: canjea el código por una sesión. Recibir el código
+   * prueba el control del email, así que además deja el email verificado y, si la cuenta la
+   * había creado un tercero (pendiente de activar), la activa (misma prueba que el reclamo).
+   */
+  async loginWithCode(dto: LoginCodeDto): Promise<IssuedTokens> {
+    const token = await this.verification.consume(dto.email, VerificationPurpose.Otp, dto.code);
+    if (!token) throw new BadRequestException('Codigo invalido o vencido');
+    const account = await this.accounts.findByEmail(dto.email);
+    if (!account) throw new BadRequestException('Codigo invalido o vencido');
+    this.assertActive(account);
+
+    if (!account.isClaimed || !account.emailVerifiedAt) {
+      account.isClaimed = true;
+      account.emailVerifiedAt ??= new Date();
+      await this.accounts.save(account);
+    }
     return this.issueAndPersist(account);
   }
 

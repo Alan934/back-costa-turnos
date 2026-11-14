@@ -172,6 +172,18 @@ export class VerifyEmailDto {
   code!: string;
 }
 
+/** Ingreso sin contraseña: email + código de un solo uso recibido por mail. */
+export class LoginCodeDto {
+  @ApiProperty({ example: 'cliente@mail.com' })
+  @IsEmail()
+  email!: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @Length(6, 6)
+  code!: string;
+}
+
 export class ResetPasswordDto {
   @ApiProperty()
   @IsEmail()
@@ -228,6 +240,9 @@ export class AuthMeDto {
 
   @ApiPropertyOptional({ description: 'nombre y apellido de la persona de la cuenta' })
   fullName?: string;
+
+  @ApiPropertyOptional({ description: 'teléfono de la persona (para precargar reservas)' })
+  phone?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   staffId?: string;

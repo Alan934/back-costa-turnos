@@ -56,11 +56,18 @@ export class SmtpEmailSender implements NotificationSender {
 
   /** Enlaces para gestionar el turno y agendarlo. */
   private manageLines(p: Record<string, unknown>): string {
-    const lines = [
-      '',
-      `¿No podés ir? Reprogramalo o cancelalo desde "Mis turnos": ${this.frontUrl}/mis-turnos`,
-      '(Ingresá con este mismo email; si no tenés cuenta, creala y el turno aparece solo.)',
-    ];
+    const token = str(p.manageToken);
+    const lines = token
+      ? [
+          '',
+          // Link personal: abre el turno directo, sin cuenta ni contraseña.
+          `¿No podés ir? Reprogramalo o cancelalo acá: ${this.frontUrl}/turno/${token}`,
+        ]
+      : [
+          '',
+          `¿No podés ir? Reprogramalo o cancelalo desde "Mis turnos": ${this.frontUrl}/mis-turnos`,
+          '(Ingresá con este mismo email; si no tenés cuenta, creala y el turno aparece solo.)',
+        ];
     const calendar = googleCalendarUrl(p);
     if (calendar) lines.push('', `Agregar a Google Calendar: ${calendar}`);
     return lines.join('\n');

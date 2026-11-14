@@ -187,6 +187,17 @@ export class Appointment extends BaseEntity {
   @Column({ name: 'public_token', type: 'text', nullable: true })
   publicToken!: string | null;
 
+  /**
+   * Token opaco del link "gestionar mi turno" (/turno/:token) que va en el email de
+   * confirmación: permite ver, cancelar y reprogramar SIN cuenta. Es distinto de
+   * `publicToken` (ese existe solo desde el check-in y abre la sala de espera). Se genera
+   * al reservar; null en turnos anteriores a esta función y en entradas de sala.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Index('idx_appointment_manage_token', { unique: true, where: 'manage_token IS NOT NULL' })
+  @Column({ name: 'manage_token', type: 'text', nullable: true })
+  manageToken!: string | null;
+
   @ApiProperty({ enum: CreatedVia, enumName: 'CreatedVia' })
   @Column({
     name: 'created_via',

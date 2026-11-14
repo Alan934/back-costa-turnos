@@ -70,4 +70,12 @@ export class MyAppointmentDto {
       'persona hizo check-in de llegada; null = todavía no está en la fila.',
   })
   publicToken!: string | null;
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Token del link "gestionar mi turno" (/turno/{token}): ver, cancelar y reprogramar sin ' +
+      'cuenta. null en turnos anteriores a esta función y en entradas de sala.',
+  })
+  manageToken!: string | null;
 }

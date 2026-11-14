@@ -98,6 +98,11 @@ const EMPTY_ATTENDANCE: WalkInStatusDto = {
   windows: [],
 };
 
+/** Token opaco del link "gestionar mi turno" (192 bits: no se puede adivinar). */
+function newManageToken(): string {
+  return randomBytes(24).toString('base64url');
+}
+
 /** "$ 2.000" a partir de centavos (para textos de avisos). */
 function formatPesos(cents: number): string {
   return `$ ${Math.round(cents / 100).toLocaleString('es-AR')}`;
@@ -437,6 +442,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         email: ref.email ?? null,
         phone: ref.phone ?? null,
       });
+      // La cuenta no tenía teléfono: se guarda el que acaba de tipear, así la próxima
+      // reserva ya viene precargada (/auth/me lo devuelve). No se pisa uno existente.
+      if (!person.phone && ref.phone) {
+        person.phone = ref.phone;
+        await this.persons.save(person).catch(() => undefined); // p. ej. teléfono ya usado
+      }
       return person.id;
     }
     if (ref.personId) {
@@ -617,6 +628,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       status: AppointmentStatus.Confirmed,
       isProvisional,
       createdVia,
+      manageToken: newManageToken(),
     });
     const saved = await this.appointments.save(appointment);
     await this.ensureProfessionalClient(tenantId, personId);
@@ -808,6 +820,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
               status: AppointmentStatus.Confirmed,
               isProvisional: false,
               createdVia: CreatedVia.ClientSelf,
+              manageToken: newManageToken(),
             }),
           );
           await this.ensureProfessionalClient(tenantId, personId, manager);
@@ -983,6 +996,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
           status: AppointmentStatus.Confirmed,
           isProvisional: false,
           createdVia: CreatedVia.ClientSelf,
+          manageToken: newManageToken(),
         }),
       );
       await this.ensureProfessionalClient(payment.professionalId, pending.personId, manager);
@@ -2166,6 +2180,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         address: comercio?.address ?? professional?.address ?? null,
         isProvisional: appointment.isProvisional,
         paymentNote,
+        manageToken: appointment.manageToken,
       });
     } catch (err) {
       this.logger.warn(`Aviso de turno ${appointment.id} no encolado: ${String(err)}`);

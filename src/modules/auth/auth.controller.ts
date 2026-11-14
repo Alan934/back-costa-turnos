@@ -30,6 +30,7 @@ import {
   AuthTokensDto,
   ClaimAccountDto,
   GoogleExchangeDto,
+  LoginCodeDto,
   LoginDto,
   RefreshDto,
   RegisterComercialDto,
@@ -96,6 +97,31 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
+  }
+
+  @ApiOperation({
+    summary: 'Ingreso sin contraseña: pedir código por email',
+    description: 'Siempre responde { ok: true }: no revela si el email tiene cuenta.',
+  })
+  @ApiResponse({ status: 202, description: 'Respuesta { ok: true }' })
+  @Public()
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('request-login-code')
+  async requestLoginCode(@Body() dto: RequestCodeDto): Promise<{ ok: true }> {
+    await this.auth.requestLoginCode(dto.email);
+    return { ok: true };
+  }
+
+  @ApiOperation({ summary: 'Ingreso sin contraseña: canjear el código por una sesión' })
+  @ApiResponse({ status: 200, type: AuthTokensDto })
+  @ApiResponse({ status: 400, description: 'Código inválido o vencido' })
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('login-code')
+  loginCode(@Body() dto: LoginCodeDto) {
+    return this.auth.loginWithCode(dto);
   }
 
   @ApiOperation({ summary: 'Renovar tokens de acceso' })

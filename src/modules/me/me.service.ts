@@ -87,6 +87,38 @@ export class MeService {
       where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
+    return this.cancelAppointment(appt);
+  }
+
+  // ---- Gestión por link personal (/turno/:token): sin cuenta, el token es la credencial ----
+
+  private async findByManageToken(token: string): Promise<Appointment> {
+    // Tokens de 32 caracteres (24 bytes base64url): cualquier otra cosa ni se consulta.
+    const appt = /^[A-Za-z0-9_-]{32}$/.test(token)
+      ? await this.appointments.findOne({ where: { manageToken: token } })
+      : null;
+    if (!appt) throw new NotFoundException('Turno no encontrado');
+    return appt;
+  }
+
+  async getByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    return this.toDto(appt, await this.loadRefs([appt]));
+  }
+
+  async cancelByManageToken(token: string): Promise<MyAppointmentDto> {
+    return this.cancelAppointment(await this.findByManageToken(token));
+  }
+
+  async rescheduleByManageToken(
+    token: string,
+    dto: RescheduleMyAppointmentDto,
+  ): Promise<MyAppointmentDto> {
+    return this.rescheduleAppointment(await this.findByManageToken(token), dto);
+  }
+
+  /** Cancela el turno ya resuelto (por cuenta o por token), respetando la ventana del negocio. */
+  private async cancelAppointment(appt: Appointment): Promise<MyAppointmentDto> {
     if (TERMINAL.includes(appt.status)) {
       throw new BadRequestException('El turno no se puede cancelar en su estado actual');
     }
@@ -121,6 +153,14 @@ export class MeService {
       where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
+    return this.rescheduleAppointment(appt, dto);
+  }
+
+  /** Reprograma el turno ya resuelto (por cuenta o por token), con todas las reglas del negocio. */
+  private async rescheduleAppointment(
+    appt: Appointment,
+    dto: RescheduleMyAppointmentDto,
+  ): Promise<MyAppointmentDto> {
     if (TERMINAL.includes(appt.status)) {
       throw new BadRequestException('El turno no se puede reprogramar en su estado actual');
     }
@@ -215,6 +255,7 @@ export class MeService {
       professionalName: staffMember?.displayName ?? null,
       placeName: professional?.businessName ?? 'el negocio',
       address: professional?.address ?? null,
+      manageToken: appt.manageToken,
       confirmation: false,
     });
 
@@ -271,6 +312,7 @@ export class MeService {
       priceCents: service?.priceCents ?? 0,
       staffName: staff?.displayName ?? '',
       publicToken: a.publicToken,
+      manageToken: a.manageToken,
       business: {
         name: professional?.businessName ?? '',
         slug: professional?.slug ?? '',
