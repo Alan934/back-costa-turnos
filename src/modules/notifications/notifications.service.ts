@@ -1,5 +1,5 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
@@ -17,8 +17,58 @@ export interface EnqueueNotificationInput {
   scheduledFor?: Date;
 }
 
+export interface AppointmentNoticeInput {
+  professionalId: string;
+  personId: string;
+  appointmentId: string;
+  startAt: Date;
+  endAt: Date;
+  /** Zona horaria del profesional: la fecha del mail se escribe en su hora local. */
+  timezone: string;
+  serviceName: string;
+  professionalName?: string | null;
+  placeName: string;
+  address?: string | null;
+  isProvisional?: boolean;
+  /** Frase sobre el pago ("Ya abonaste $ 2.000.", "Abonás en el local."). */
+  paymentNote?: string | null;
+  /** false = solo reprograma el recordatorio (p. ej. al mover el turno). */
+  confirmation?: boolean;
+}
+
+/** El recordatorio sale 24 h antes del turno. */
+const REMINDER_LEAD_MS = 24 * 3_600_000;
+/** ...salvo que para ese momento falten menos de 2 h (reservó sobre la hora). */
+const REMINDER_MIN_GAP_MS = 2 * 3_600_000;
+
+/** "martes 17 de noviembre a las 10:30" en la zona horaria dada. */
+export function formatWhen(date: Date, timezone: string): string {
+  const fmt = (timeZone: string) => {
+    const day = new Intl.DateTimeFormat('es-AR', {
+      timeZone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(date);
+    const time = new Intl.DateTimeFormat('es-AR', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+    return `${day} a las ${time}`;
+  };
+  try {
+    return fmt(timezone);
+  } catch {
+    return fmt('America/Argentina/Buenos_Aires'); // zona inválida guardada en el perfil
+  }
+}
+
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @InjectRepository(Notification)
     private readonly notifications: Repository<Notification>,
@@ -57,6 +107,53 @@ export class NotificationsService {
     );
 
     return notification;
+  }
+
+  /**
+   * Avisos al CLIENTE por un turno: la confirmación (ahora) y el recordatorio (24 h antes).
+   * Se guarda en el payload una "foto" de los datos a mostrar para que el envío no dependa
+   * de volver a consultar el turno. El recordatorio se descarta al enviarse si el turno fue
+   * cancelado o movido (ver NotificationsProcessor).
+   *
+   * Nunca lanza: un problema con la cola de avisos no debe hacer fallar una reserva.
+   */
+  async notifyAppointment(input: AppointmentNoticeInput): Promise<void> {
+    try {
+      // Sin recordatorio si faltan menos de ~26 h: acaba de reservar (o de moverlo).
+      const remindAt = new Date(input.startAt.getTime() - REMINDER_LEAD_MS);
+      const willRemind = remindAt.getTime() - Date.now() >= REMINDER_MIN_GAP_MS;
+      const payload = {
+        willRemind,
+        appointmentId: input.appointmentId,
+        startAt: input.startAt.toISOString(),
+        endAt: input.endAt.toISOString(),
+        whenText: formatWhen(input.startAt, input.timezone),
+        serviceName: input.serviceName,
+        professionalName: input.professionalName ?? null,
+        placeName: input.placeName,
+        address: input.address ?? null,
+        isProvisional: input.isProvisional ?? false,
+        paymentNote: input.paymentNote ?? null,
+      };
+      const base = {
+        professionalId: input.professionalId,
+        personId: input.personId,
+        channel: NotificationChannel.Email,
+      };
+      if (input.confirmation !== false) {
+        await this.enqueue({ ...base, type: NotificationType.Booked, payload });
+      }
+      if (willRemind) {
+        await this.enqueue({
+          ...base,
+          type: NotificationType.Reminder,
+          payload,
+          scheduledFor: remindAt,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`No se pudieron encolar los avisos del turno: ${String(err)}`);
+    }
   }
 
   list(tenantId: string): Promise<Notification[]> {

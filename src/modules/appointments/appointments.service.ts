@@ -98,6 +98,11 @@ const EMPTY_ATTENDANCE: WalkInStatusDto = {
   windows: [],
 };
 
+/** "$ 2.000" a partir de centavos (para textos de avisos). */
+function formatPesos(cents: number): string {
+  return `$ ${Math.round(cents / 100).toLocaleString('es-AR')}`;
+}
+
 const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 /** " Próxima franja: el sábado de 09:00 a 13:00." (o vacío si no hay ninguna). */
@@ -630,6 +635,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         ),
       );
     }
+    await this.notifyBooked(saved, service);
     return saved;
   }
 
@@ -835,13 +841,13 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
               paidAt: null,
             }),
           );
-          await this.notifications.enqueue({
-            professionalId: tenantId,
-            personId,
-            channel: NotificationChannel.Email,
-            type: NotificationType.Deposit,
-            payload: { appointmentId: appointment.id, amountCents: payment.amountCents },
-          });
+          // Antes salía el aviso "Seña pendiente": pedía abonar una seña que acá no existe
+          // (se paga en persona). Ahora sale la confirmación del turno con esa aclaración.
+          await this.notifyBooked(
+            appointment,
+            service,
+            `Abonás ${formatPesos(payment.amountCents)} en el local el día del turno.`,
+          );
           return { appointment: appointment, payment };
         }
 
@@ -998,13 +1004,15 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       await manager.update(Payment, { id: payment.id }, { appointmentId: appointment.id });
       await manager.delete(PendingBooking, { id: pending.id });
 
-      await this.notifications.enqueue({
-        professionalId: payment.professionalId,
-        personId: pending.personId,
-        channel: NotificationChannel.Email,
-        type: NotificationType.Deposit,
-        payload: { appointmentId: appointment.id, amountCents: pending.amountCents },
-      });
+      // Antes salía "Seña pendiente" a alguien que YA había pagado. Ahora, la confirmación.
+      const service = await manager.findOne(Service, { where: { id: pending.serviceId } });
+      if (service) {
+        await this.notifyBooked(
+          appointment,
+          service,
+          `Ya abonaste ${formatPesos(pending.amountCents)} por Mercado Pago.`,
+        );
+      }
     });
   }
 
@@ -2126,6 +2134,42 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     void this.notifier
       .notifyProgress(room)
       .catch((err) => this.logger.warn(`Push de avance falló: ${String(err)}`));
+  }
+
+  /**
+   * Confirmación + recordatorio por email al cliente de un turno recién creado. Solo llega
+   * si la persona dejó un email. Nunca lanza: un aviso fallido no rompe la reserva.
+   */
+  private async notifyBooked(
+    appointment: Appointment,
+    service: Service,
+    paymentNote?: string,
+  ): Promise<void> {
+    try {
+      const [professional, comercio, staffMember] = await Promise.all([
+        this.professionals.findOne({ where: { id: appointment.professionalId } }),
+        this.comercios.getComercio(appointment.comercioId).catch(() => null),
+        appointment.staffId
+          ? this.staff.findOne({ where: { id: appointment.staffId } })
+          : Promise.resolve(null),
+      ]);
+      await this.notifications.notifyAppointment({
+        professionalId: appointment.professionalId,
+        personId: appointment.personId,
+        appointmentId: appointment.id,
+        startAt: appointment.startAt,
+        endAt: appointment.endAt,
+        timezone: professional?.timezone ?? 'America/Argentina/Buenos_Aires',
+        serviceName: service.name,
+        professionalName: staffMember?.displayName ?? null,
+        placeName: comercio?.name ?? professional?.businessName ?? 'el negocio',
+        address: comercio?.address ?? professional?.address ?? null,
+        isProvisional: appointment.isProvisional,
+        paymentNote,
+      });
+    } catch (err) {
+      this.logger.warn(`Aviso de turno ${appointment.id} no encolado: ${String(err)}`);
+    }
   }
 
   private async staffName(staffId: string): Promise<string> {

@@ -198,6 +198,26 @@ export class MeService {
       },
     });
 
+    // El recordatorio que estaba programado quedó viejo (se descarta solo al salir, por el
+    // cambio de horario): se programa uno nuevo para la fecha nueva. Sin confirmación: el
+    // cliente acaba de moverlo él mismo.
+    const staffMember = appt.staffId
+      ? await this.staff.findOne({ where: { id: appt.staffId } })
+      : null;
+    await this.notifications.notifyAppointment({
+      professionalId: appt.professionalId,
+      personId: appt.personId,
+      appointmentId: appt.id,
+      startAt: appt.startAt,
+      endAt: appt.endAt,
+      timezone: professional?.timezone ?? 'America/Argentina/Buenos_Aires',
+      serviceName: service.name,
+      professionalName: staffMember?.displayName ?? null,
+      placeName: professional?.businessName ?? 'el negocio',
+      address: professional?.address ?? null,
+      confirmation: false,
+    });
+
     const maps = await this.loadRefs([appt]);
     return this.toDto(appt, maps);
   }

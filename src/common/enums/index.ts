@@ -201,6 +201,8 @@ export enum NotificationType {
   Deposit = 'deposit',
   Subscription = 'subscription',
   Rescheduled = 'rescheduled',
+  /** Confirmación al cliente de un turno recién reservado. */
+  Booked = 'booked',
 }
 
 export enum NotificationStatus {

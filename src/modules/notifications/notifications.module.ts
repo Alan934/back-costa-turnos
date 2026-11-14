@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { IdentityModule } from '@/modules/identity/identity.module';
 import { MailConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { Notification } from './entities/notification.entity';
 import { NotificationsService } from './notifications.service';
 import { NotificationsProcessor } from './notifications.processor';
@@ -17,7 +18,7 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, Professional]),
+    TypeOrmModule.forFeature([Notification, Professional, Appointment]),
     BullModule.registerQueue({ name: NOTIFICATIONS_QUEUE }),
     IdentityModule,
   ],
