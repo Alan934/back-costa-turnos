@@ -98,7 +98,7 @@ export class Professional extends BaseEntity {
    */
   @ApiProperty({ type: 'object', additionalProperties: true })
   @Column({ name: 'notification_prefs', type: 'jsonb', default: () => "'{}'::jsonb" })
-  notificationPrefs!: { email?: boolean; push?: boolean };
+  notificationPrefs!: { email?: boolean; push?: boolean; dailySummary?: boolean };
 
   // ---- Conexion MercadoPago (OAuth marketplace): cobra las señas/turnos a su cuenta ----
   /** user_id de MercadoPago del profesional (collector). */

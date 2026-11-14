@@ -202,11 +202,25 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     membershipId: string,
   ): Promise<{ professionalId: string; staffId: string }> {
     const membership = await this.comercios.getMembershipById(membershipId);
-    const staff = await this.staff.findOne({
-      where: { professionalId: membership.professionalId },
-    });
+    const staff = await this.primaryStaff(membership.professionalId);
     if (!staff) throw new NotFoundException('El profesional no tiene agenda configurada');
     return { professionalId: membership.professionalId, staffId: staff.id };
+  }
+
+  /**
+   * Quien atiende las reservas que entran por la página pública: el primer miembro del equipo
+   * del profesional (orden fijo, para que la agenda y el nombre mostrado coincidan siempre).
+   */
+  private primaryStaff(professionalId: string): Promise<Staff | null> {
+    return this.staff.findOne({ where: { professionalId }, order: { createdAt: 'ASC' } });
+  }
+
+  /**
+   * Nombre con el que el profesional aparece en la página pública: el de quien atiende (tal
+   * como lo cargó en Equipo), no el de su negocio. `null` si todavía no cargó a nadie.
+   */
+  async publicDisplayName(professionalId: string): Promise<string | null> {
+    return (await this.primaryStaff(professionalId))?.displayName ?? null;
   }
 
   /**

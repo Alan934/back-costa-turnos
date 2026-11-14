@@ -9,6 +9,7 @@ import { Professional } from '@/modules/professionals/entities/professional.enti
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { Notification } from './entities/notification.entity';
 import { NotificationsService } from './notifications.service';
+import { DailySummaryService } from './daily-summary.service';
 import { NotificationsProcessor } from './notifications.processor';
 import { NotificationsController } from './notifications.controller';
 import { NOTIFICATIONS_QUEUE } from './notifications.constants';
@@ -27,6 +28,7 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
+    DailySummaryService,
     NotificationsProcessor,
     EmailStubSender,
     SmtpEmailSender,
@@ -47,6 +49,6 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
       inject: [ConfigService, EmailStubSender, SmtpEmailSender, WhatsappStubSender],
     },
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, DailySummaryService],
 })
 export class NotificationsModule {}

@@ -75,7 +75,11 @@ export class PublicBookingController {
       walkInSchedule: attendance.windows,
       membershipId: membership.id,
       professionalId: membership.professionalId,
-      displayName: membership.professional?.businessName ?? 'Profesional',
+      // El nombre de quien atiende (lo que el cliente necesita para elegir), no el del negocio.
+      displayName:
+        (await this.appointments.publicDisplayName(membership.professionalId)) ??
+        membership.professional?.businessName ??
+        'Profesional',
       address: this.resolveAddress(membership, comercio),
       bio: settings.bio ?? null,
       phone: settings.phone ?? null,

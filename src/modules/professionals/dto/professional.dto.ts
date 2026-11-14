@@ -73,6 +73,14 @@ export class NotificationPrefsDto {
   @IsOptional()
   @IsBoolean()
   push?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'Resumen de los turnos del día, a la mañana (default: activado)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  dailySummary?: boolean;
 }
 
 export class UpdateProfessionalDto {

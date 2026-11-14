@@ -207,6 +207,8 @@ export enum NotificationType {
   ProBooked = 'pro_booked',
   /** Aviso al PROFESIONAL: un cliente canceló su turno. */
   ProCancelled = 'pro_cancelled',
+  /** Al PROFESIONAL, a la mañana: los turnos que tiene hoy. */
+  DailySummary = 'daily_summary',
 }
 
 export enum NotificationStatus {

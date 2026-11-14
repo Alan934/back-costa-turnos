@@ -167,6 +167,38 @@ export class SmtpEmailSender implements NotificationSender {
           ].join('\n'),
         };
       }
+      case NotificationType.DailySummary: {
+        const items = Array.isArray(p.items) ? (p.items as Record<string, unknown>[]) : [];
+        const count = items.length;
+        const lines = items.map((it) =>
+          [
+            str(it.time),
+            str(it.serviceName),
+            [str(it.clientName), str(it.clientPhone) && `(${str(it.clientPhone)})`]
+              .filter(Boolean)
+              .join(' '),
+            str(it.staffName) && `con ${str(it.staffName)}`,
+            it.isProvisional === true && 'provisional, sin seña',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        );
+        const first = items[0];
+        return {
+          subject:
+            count === 1
+              ? `Hoy tenés 1 turno, a las ${str(first?.time)}`
+              : `Hoy tenés ${count} turnos (el primero a las ${str(first?.time)})`,
+          text: [
+            `¡Buen día! Estos son tus turnos de hoy${str(p.dayText) ? `, ${str(p.dayText)}` : ''}:`,
+            '',
+            ...lines,
+            '',
+            `Ver la agenda: ${this.frontUrl}/app/agenda`,
+            `(Podés apagar este resumen en Configuración: ${this.frontUrl}/app/configuracion)`,
+          ].join('\n'),
+        };
+      }
       case NotificationType.Rescheduled: {
         const who = str(p.clientName) || 'Un cliente';
         const oldAt = str(p.oldStartAt);
