@@ -13,6 +13,7 @@ import {
   NotificationType,
 } from '@/common/enums';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
+import { WaitlistService } from '@/modules/waitlist/waitlist.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { Service } from '@/modules/catalog/entities/service.entity';
@@ -46,6 +47,7 @@ export class MeService {
     @InjectRepository(Membership)
     private readonly memberships: Repository<Membership>,
     private readonly notifications: NotificationsService,
+    private readonly waitlist: WaitlistService,
   ) {}
 
   /**
@@ -136,6 +138,16 @@ export class MeService {
     appt.cancellationReason = CancellationReason.Client;
     await this.appointments.save(appt);
 
+    // El horario quedó libre: se avisa a quienes esperaban ese día.
+    await this.waitlist.notifyFreedSlot({
+      professionalId: appt.professionalId,
+      comercioId: appt.comercioId,
+      membershipId: appt.membershipId,
+      serviceId: appt.serviceId,
+      startAt: appt.startAt,
+      excludePersonId: appt.personId,
+    });
+
     const maps = await this.loadRefs([appt]);
     return this.toDto(appt, maps);
   }
@@ -219,10 +231,21 @@ export class MeService {
       throw new ConflictException('El nuevo horario se solapa con otro turno');
     }
 
+    const freedStartAt = appt.startAt;
     const oldStartAt = appt.startAt.toISOString();
     appt.startAt = newStart;
     appt.endAt = newEnd;
     await this.appointments.save(appt);
+
+    // El horario anterior quedó libre: se avisa a quienes esperaban ese día.
+    await this.waitlist.notifyFreedSlot({
+      professionalId: appt.professionalId,
+      comercioId: appt.comercioId,
+      membershipId: appt.membershipId,
+      serviceId: appt.serviceId,
+      startAt: freedStartAt,
+      excludePersonId: appt.personId,
+    });
 
     // Avisa al profesional por correo que el cliente movió el turno.
     const owner = await this.persons.findOne({ where: { id: appt.personId } });

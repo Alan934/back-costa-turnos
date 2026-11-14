@@ -4,10 +4,12 @@ import { NotificationsModule } from '@/modules/notifications/notifications.modul
 import { WaitlistEntry } from './entities/waitlist-entry.entity';
 import { WaitlistService } from './waitlist.service';
 import { WaitlistController } from './waitlist.controller';
+import { PublicWaitlistController } from './public-waitlist.controller';
+import { IdentityModule } from '@/modules/identity/identity.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WaitlistEntry]), NotificationsModule],
-  controllers: [WaitlistController],
+  imports: [TypeOrmModule.forFeature([WaitlistEntry]), NotificationsModule, IdentityModule],
+  controllers: [WaitlistController, PublicWaitlistController],
   providers: [WaitlistService],
   exports: [WaitlistService],
 })

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { WaitlistService } from '@/modules/waitlist/waitlist.service';
 import {
   BadRequestException,
   ConflictException,
@@ -163,6 +164,8 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     private readonly subscriptions: SubscriptionsService,
     private readonly notifier: WaitingRoomNotifier,
     private readonly push: PushService,
+    // Último y opcional en la práctica: los tests arman el servicio a mano sin este colaborador.
+    private readonly waitlist?: WaitlistService,
   ) {}
 
   /** Se registra como confirmador para que el webhook de pagos cree el turno. */
@@ -463,6 +466,12 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       email: ref.email ?? null,
       phone: ref.phone ?? null,
     });
+    // La ficha existía (se emparejó por teléfono) pero sin email: se guarda el que dejó ahora.
+    // Si no, la confirmación y el recordatorio no tendrían a dónde salir. No pisa uno existente.
+    if (!person.email && ref.email) {
+      person.email = ref.email;
+      await this.persons.save(person).catch(() => undefined);
+    }
     return person.id;
   }
 
@@ -1217,18 +1226,28 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     });
   }
 
-  cancel(
+  async cancel(
     tenantId: string,
     id: string,
     reason: CancellationReason = CancellationReason.Client,
   ): Promise<Appointment> {
-    return this.transition(tenantId, id, (a) => {
+    const cancelled = await this.transition(tenantId, id, (a) => {
       if ([AppointmentStatus.Done, AppointmentStatus.Cancelled].includes(a.status)) {
         throw new BadRequestException('El turno no se puede cancelar en su estado actual');
       }
       a.status = AppointmentStatus.Cancelled;
       a.cancellationReason = reason;
     });
+    // El horario quedó libre: se avisa a quienes esperaban ese día (lista de espera).
+    await this.waitlist?.notifyFreedSlot({
+      professionalId: cancelled.professionalId,
+      comercioId: cancelled.comercioId,
+      membershipId: cancelled.membershipId,
+      serviceId: cancelled.serviceId,
+      startAt: cancelled.startAt,
+      excludePersonId: cancelled.personId,
+    });
+    return cancelled;
   }
 
   // ---- Sala de espera ----

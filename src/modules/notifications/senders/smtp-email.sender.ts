@@ -106,8 +106,23 @@ export class SmtpEmailSender implements NotificationSender {
         };
       case NotificationType.Waitlist:
         return {
-          subject: 'Se liberó un turno',
-          text: 'Se liberó un horario que estabas esperando. Ingresá para reservarlo.',
+          subject: str(p.whenText) ? `Se liberó un turno: ${str(p.whenText)}` : 'Se liberó un turno',
+          text: [
+            'Se liberó un horario que estabas esperando:',
+            '',
+            [
+              str(p.serviceName) && `Servicio: ${str(p.serviceName)}`,
+              str(p.whenText) && `Cuándo: ${str(p.whenText)}`,
+              str(p.placeName) && `Dónde: ${str(p.placeName)}`,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            '',
+            str(p.bookPath)
+              ? `Reservalo acá antes de que lo tome otra persona: ${this.frontUrl}${str(p.bookPath)}`
+              : 'Ingresá a la página del negocio para reservarlo.',
+            '(No queda reservado a tu nombre: se lo lleva quien lo reserve primero.)',
+          ].join('\n'),
         };
       case NotificationType.Bumped:
         return {
