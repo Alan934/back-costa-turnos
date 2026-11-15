@@ -141,6 +141,16 @@ export class ClientsController {
     return this.clients.archiveClient(tenantId, id);
   }
 
+  @ApiOperation({ summary: 'Desarchivar un cliente (vuelve a la cartera activa)' })
+  @ApiResponse({ status: 201, type: EnrichedClientDto })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/restore')
+  restoreClient(@CurrentTenant() tenantId: string, @Param('id') id: string) {
+    return this.clients.restoreClient(tenantId, id);
+  }
+
   // ---- Notas privadas ----
   @ApiOperation({ summary: 'Listar notas privadas de un cliente' })
   @ApiResponse({ status: 200, type: ClientNote, isArray: true })

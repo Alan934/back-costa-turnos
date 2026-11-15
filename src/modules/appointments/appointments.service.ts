@@ -1339,15 +1339,27 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       ...new Set(appts.map((a) => a.serviceId).filter((id): id is string => !!id)),
     ];
     const personIds = [...new Set(appts.map((a) => a.personId))];
-    const [services, persons] = await Promise.all([
+    const [services, persons, addons] = await Promise.all([
       serviceIds.length ? this.services.find({ where: { id: In(serviceIds) } }) : [],
       this.persons.findByIds(personIds),
+      this.addons.find({
+        where: { appointmentId: In(appts.map((a) => a.id)) },
+        select: ['appointmentId', 'priceAtBookingCents', 'discountAppliedCents', 'isFree'],
+      }),
     ]);
-    const serviceNameById = new Map(services.map((s) => [s.id, s.name]));
+    const serviceById = new Map(services.map((s) => [s.id, s]));
     const personById = new Map(persons.map((p) => [p.id, p]));
+    // Adicionales con su precio al reservar (snapshot), menos el descuento; gratis = 0.
+    const addonsCentsById = new Map<string, number>();
+    for (const x of addons) {
+      const net = x.isFree ? 0 : Math.max(0, x.priceAtBookingCents - x.discountAppliedCents);
+      addonsCentsById.set(x.appointmentId, (addonsCentsById.get(x.appointmentId) ?? 0) + net);
+    }
 
     for (const a of appts) {
-      a.serviceName = (a.serviceId && serviceNameById.get(a.serviceId)) || NO_SERVICE_LABEL;
+      const service = a.serviceId ? serviceById.get(a.serviceId) : undefined;
+      a.serviceName = service?.name || NO_SERVICE_LABEL;
+      a.priceCents = service ? service.priceCents + (addonsCentsById.get(a.id) ?? 0) : null;
       const person = personById.get(a.personId);
       a.personName = person?.fullName ?? '';
       a.personPhone = person?.phone ?? null;

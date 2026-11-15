@@ -247,6 +247,15 @@ export class Appointment extends BaseEntity {
   serviceName?: string;
 
   @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'Precio estimado del turno en centavos: precio del servicio + adicionales (con su ' +
+      'descuento; gratis = 0). Null si no tiene servicio asignado. Solo en el listado.',
+  })
+  priceCents?: number | null;
+
+  @ApiPropertyOptional({
     description: 'Nombre del profesional asignado (se completa al reservar con "cualquiera").',
   })
   professionalDisplayName?: string;

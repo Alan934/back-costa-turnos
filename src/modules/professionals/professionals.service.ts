@@ -157,6 +157,11 @@ export class ProfessionalsService {
     return this.professionals.save(professional);
   }
 
+  async markNewsSeen(tenantId: string): Promise<Professional> {
+    await this.professionals.update({ id: tenantId }, { newsSeenAt: new Date() });
+    return this.findById(tenantId);
+  }
+
   // ---- Staff ----
   listStaff(tenantId: string): Promise<Staff[]> {
     return this.staff.find({

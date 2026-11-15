@@ -85,6 +85,21 @@ export class ProfessionalsController {
     return this.professionals.update(tenantId, dto);
   }
 
+  @ApiOperation({
+    summary: 'Marcar las novedades del Inicio como vistas',
+    description: 'Setea `newsSeenAt` en ahora. Vale para todos los dispositivos del profesional.',
+  })
+  @ApiResponse({ status: 200, type: Professional })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @UseGuards(RolesGuard, TenantGuard)
+  @Roles(AppRole.Professional)
+  @HttpCode(HttpStatus.OK)
+  @Post('me/news-seen')
+  markNewsSeen(@CurrentTenant() tenantId: string) {
+    return this.professionals.markNewsSeen(tenantId);
+  }
+
   // ---- Staff ----
   @ApiOperation({ summary: 'Listar el staff del professional' })
   @ApiResponse({ status: 200, type: Staff, isArray: true })

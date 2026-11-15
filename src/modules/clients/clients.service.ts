@@ -288,6 +288,13 @@ export class ClientsService {
     return this.getClientEnriched(tenantId, id);
   }
 
+  async restoreClient(tenantId: string, id: string): Promise<EnrichedClientDto> {
+    const client = await this.getClient(tenantId, id);
+    client.status = ProfessionalClientStatus.Active;
+    await this.clients.save(client);
+    return this.getClientEnriched(tenantId, id);
+  }
+
   // ---- Notes (privadas) ----
   async listNotes(tenantId: string, clientId: string): Promise<ClientNote[]> {
     await this.getClient(tenantId, clientId); // valida pertenencia al tenant
