@@ -9,10 +9,13 @@ import { In, Repository } from 'typeorm';
 import {
   AppointmentStatus,
   CancellationReason,
-  NotificationChannel,
   NotificationType,
 } from '@/common/enums';
-import { NotificationsService } from '@/modules/notifications/notifications.service';
+import {
+  formatWhen,
+  NotificationsService,
+} from '@/modules/notifications/notifications.service';
+import { WaitlistService } from '@/modules/waitlist/waitlist.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { NO_SERVICE_LABEL } from '@/modules/appointments/dto/waiting-room.dto';
 import { Service } from '@/modules/catalog/entities/service.entity';
@@ -46,6 +49,7 @@ export class MeService {
     @InjectRepository(Membership)
     private readonly memberships: Repository<Membership>,
     private readonly notifications: NotificationsService,
+    private readonly waitlist: WaitlistService,
   ) {}
 
   /**
@@ -87,14 +91,79 @@ export class MeService {
       where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
+    return this.cancelAppointment(appt);
+  }
+
+  // ---- Gestión por link personal (/turno/:token): sin cuenta, el token es la credencial ----
+
+  private async findByManageToken(token: string): Promise<Appointment> {
+    // Tokens de 32 caracteres (24 bytes base64url): cualquier otra cosa ni se consulta.
+    const appt = /^[A-Za-z0-9_-]{32}$/.test(token)
+      ? await this.appointments.findOne({ where: { manageToken: token } })
+      : null;
+    if (!appt) throw new NotFoundException('Turno no encontrado');
+    return appt;
+  }
+
+  async getByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    return this.toDto(appt, await this.loadRefs([appt]));
+  }
+
+  async cancelByManageToken(token: string): Promise<MyAppointmentDto> {
+    return this.cancelAppointment(await this.findByManageToken(token));
+  }
+
+  async rescheduleByManageToken(
+    token: string,
+    dto: RescheduleMyAppointmentDto,
+  ): Promise<MyAppointmentDto> {
+    return this.rescheduleAppointment(await this.findByManageToken(token), dto);
+  }
+
+  /**
+   * Confirmación del día anterior: el cliente avisa que va. Idempotente (si ya confirmó, no
+   * cambia la fecha). Solo turnos que siguen en pie y todavía no empezaron.
+   */
+  async confirmByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    if (TERMINAL.includes(appt.status) || appt.status === AppointmentStatus.InProgress) {
+      throw new BadRequestException('Este turno ya no se puede confirmar.');
+    }
+    if (!appt.clientConfirmedAt) {
+      appt.clientConfirmedAt = new Date();
+      await this.appointments.save(appt);
+    }
+    return this.toDto(appt, await this.loadRefs([appt]));
+  }
+
+  /**
+   * "No puedo ir" desde el pedido de confirmación: cancela y libera el horario. Si el negocio
+   * pide confirmación, se acepta aunque esté dentro de la ventana de cancelación (el aviso
+   * llega justo el día anterior y el objetivo es que el horario no quede vacío sin aviso).
+   */
+  async declineByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    const professional = await this.professionals.findOne({ where: { id: appt.professionalId } });
+    return this.cancelAppointment(appt, { ignoreWindow: professional?.askConfirmation === true });
+  }
+
+  /** Cancela el turno ya resuelto (por cuenta o por token), respetando la ventana del negocio. */
+  private async cancelAppointment(
+    appt: Appointment,
+    opts: { ignoreWindow?: boolean } = {},
+  ): Promise<MyAppointmentDto> {
     if (TERMINAL.includes(appt.status)) {
       throw new BadRequestException('El turno no se puede cancelar en su estado actual');
+    }
+    if (opts.ignoreWindow && appt.startAt.getTime() < Date.now()) {
+      throw new BadRequestException('El turno ya pasó.');
     }
 
     const professional = await this.professionals.findOne({ where: { id: appt.professionalId } });
     const windowHours = professional?.cancellationWindowHours ?? 0;
     const deadline = appt.startAt.getTime() - windowHours * 3_600_000;
-    if (Date.now() > deadline) {
+    if (!opts.ignoreWindow && Date.now() > deadline) {
       throw new ConflictException(
         `Solo se puede cancelar hasta ${windowHours}h antes del turno. Contactá al negocio.`,
       );
@@ -104,7 +173,46 @@ export class MeService {
     appt.cancellationReason = CancellationReason.Client;
     await this.appointments.save(appt);
 
+    // El horario quedó libre: se avisa a quienes esperaban ese día.
+    await this.waitlist.notifyFreedSlot({
+      professionalId: appt.professionalId,
+      comercioId: appt.comercioId,
+      membershipId: appt.membershipId,
+      serviceId: appt.serviceId,
+      startAt: appt.startAt,
+      excludePersonId: appt.personId,
+    });
+
     const maps = await this.loadRefs([appt]);
+
+    // Avisa al profesional que el cliente canceló (y que el horario quedó libre).
+    const owner = await this.persons.findOne({ where: { id: appt.personId } });
+    const clientName = owner?.fullName ?? 'Un cliente';
+    const serviceName = appt.serviceId ? maps.services.get(appt.serviceId)?.name : undefined;
+    const whenText = formatWhen(
+      appt.startAt,
+      professional?.timezone ?? 'America/Argentina/Buenos_Aires',
+    );
+    await this.notifications.notifyProfessional({
+      professionalId: appt.professionalId,
+      type: NotificationType.ProCancelled,
+      payload: {
+        appointmentId: appt.id,
+        clientName,
+        clientPhone: owner?.phone ?? null,
+        clientEmail: owner?.email ?? null,
+        serviceName: serviceName ?? null,
+        professionalName: maps.staff.get(appt.staffId)?.displayName ?? null,
+        whenText,
+      },
+      push: {
+        title: 'Turno cancelado',
+        body: `${clientName} canceló${serviceName ? ` · ${serviceName}` : ''} · ${whenText}`,
+        url: '/app/agenda',
+        tag: `turno-${appt.id}`,
+      },
+    });
+
     return this.toDto(appt, maps);
   }
 
@@ -121,6 +229,14 @@ export class MeService {
       where: { id: appointmentId, personId: In(personIds) },
     });
     if (!appt) throw new NotFoundException('Turno no encontrado');
+    return this.rescheduleAppointment(appt, dto);
+  }
+
+  /** Reprograma el turno ya resuelto (por cuenta o por token), con todas las reglas del negocio. */
+  private async rescheduleAppointment(
+    appt: Appointment,
+    dto: RescheduleMyAppointmentDto,
+  ): Promise<MyAppointmentDto> {
     if (TERMINAL.includes(appt.status)) {
       throw new BadRequestException('El turno no se puede reprogramar en su estado actual');
     }
@@ -179,23 +295,64 @@ export class MeService {
       throw new ConflictException('El nuevo horario se solapa con otro turno');
     }
 
+    const freedStartAt = appt.startAt;
     const oldStartAt = appt.startAt.toISOString();
     appt.startAt = newStart;
     appt.endAt = newEnd;
+    appt.clientConfirmedAt = null; // confirmó el horario viejo, no este
     await this.appointments.save(appt);
+
+    // El horario anterior quedó libre: se avisa a quienes esperaban ese día.
+    await this.waitlist.notifyFreedSlot({
+      professionalId: appt.professionalId,
+      comercioId: appt.comercioId,
+      membershipId: appt.membershipId,
+      serviceId: appt.serviceId,
+      startAt: freedStartAt,
+      excludePersonId: appt.personId,
+    });
 
     // Avisa al profesional por correo que el cliente movió el turno.
     const owner = await this.persons.findOne({ where: { id: appt.personId } });
-    await this.notifications.enqueue({
+    const proTimezone = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
+    const newWhen = formatWhen(appt.startAt, proTimezone);
+    await this.notifications.notifyProfessional({
       professionalId: appt.professionalId,
-      channel: NotificationChannel.Email,
       type: NotificationType.Rescheduled,
       payload: {
         appointmentId: appt.id,
         clientName: owner?.fullName ?? '',
-        oldStartAt,
-        newStartAt: appt.startAt.toISOString(),
+        // Fechas ya escritas en la hora local del profesional (antes iban en ISO/UTC crudo).
+        oldStartAt: formatWhen(new Date(oldStartAt), proTimezone),
+        newStartAt: newWhen,
       },
+      push: {
+        title: 'Turno reprogramado',
+        body: `${owner?.fullName ?? 'Un cliente'} lo pasó al ${newWhen}`,
+        url: '/app/agenda',
+        tag: `turno-${appt.id}`,
+      },
+    });
+
+    // El recordatorio que estaba programado quedó viejo (se descarta solo al salir, por el
+    // cambio de horario): se programa uno nuevo para la fecha nueva. Sin confirmación: el
+    // cliente acaba de moverlo él mismo.
+    const staffMember = appt.staffId
+      ? await this.staff.findOne({ where: { id: appt.staffId } })
+      : null;
+    await this.notifications.notifyAppointment({
+      professionalId: appt.professionalId,
+      personId: appt.personId,
+      appointmentId: appt.id,
+      startAt: appt.startAt,
+      endAt: appt.endAt,
+      timezone: professional?.timezone ?? 'America/Argentina/Buenos_Aires',
+      serviceName: service.name,
+      professionalName: staffMember?.displayName ?? null,
+      placeName: professional?.businessName ?? 'el negocio',
+      address: professional?.address ?? null,
+      manageToken: appt.manageToken,
+      confirmation: false,
     });
 
     const maps = await this.loadRefs([appt]);
@@ -251,12 +408,15 @@ export class MeService {
       priceCents: service?.priceCents ?? 0,
       staffName: staff?.displayName ?? '',
       publicToken: a.publicToken,
+      manageToken: a.manageToken,
+      clientConfirmedAt: a.clientConfirmedAt ? a.clientConfirmedAt.toISOString() : null,
       business: {
         name: professional?.businessName ?? '',
         slug: professional?.slug ?? '',
         address: professional?.address ?? null,
         cancellationWindowHours: professional?.cancellationWindowHours ?? 0,
         rescheduleWindowHours: professional?.rescheduleWindowHours ?? 0,
+        askConfirmation: professional?.askConfirmation ?? false,
         // Mismo origen que la página pública (publicPageSettings). Crudo: el front
         // normaliza dígitos para wa.me. null si el profesional no lo cargó.
         phone: professional?.publicPageSettings?.phone ?? null,

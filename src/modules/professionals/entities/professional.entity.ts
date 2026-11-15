@@ -88,9 +88,31 @@ export class Professional extends BaseEntity {
   @Column({ name: 'reschedule_window_hours', type: 'integer', default: 24 })
   rescheduleWindowHours!: number;
 
+  /**
+   * Confirmación del día anterior: el recordatorio le pide al cliente "Confirmo / No puedo ir"
+   * (y "No puedo ir" libera el horario aunque esté dentro de la ventana de cancelación).
+   * Apagado por defecto.
+   */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'ask_confirmation', type: 'boolean', default: false })
+  askConfirmation!: boolean;
+
   @ApiProperty({ type: 'object', additionalProperties: true })
   @Column({ name: 'public_page_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
   publicPageSettings!: PublicPageSettings;
+
+  /**
+   * Preferencias de avisos al profesional (reserva nueva, cancelación, reprogramación).
+   * Un canal está activo salvo que figure explícitamente en false: `{}` = todo activado.
+   */
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @Column({ name: 'notification_prefs', type: 'jsonb', default: () => "'{}'::jsonb" })
+  notificationPrefs!: { email?: boolean; push?: boolean; dailySummary?: boolean };
+
+  /** Hasta cuándo ya vio las "Novedades" del Inicio (lo marca él; sirve en todos sus equipos). */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'news_seen_at', type: 'timestamptz', nullable: true })
+  newsSeenAt!: Date | null;
 
   // ---- Conexion MercadoPago (OAuth marketplace): cobra las señas/turnos a su cuenta ----
   /** user_id de MercadoPago del profesional (collector). */

@@ -201,6 +201,14 @@ export enum NotificationType {
   Deposit = 'deposit',
   Subscription = 'subscription',
   Rescheduled = 'rescheduled',
+  /** Confirmación al cliente de un turno recién reservado. */
+  Booked = 'booked',
+  /** Aviso al PROFESIONAL: un cliente reservó un turno desde la página pública. */
+  ProBooked = 'pro_booked',
+  /** Aviso al PROFESIONAL: un cliente canceló su turno. */
+  ProCancelled = 'pro_cancelled',
+  /** Al PROFESIONAL, a la mañana: los turnos que tiene hoy. */
+  DailySummary = 'daily_summary',
 }
 
 export enum NotificationStatus {

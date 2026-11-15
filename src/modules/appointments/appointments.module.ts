@@ -5,6 +5,7 @@ import { CatalogModule } from '@/modules/catalog/catalog.module';
 import { ProfessionalsModule } from '@/modules/professionals/professionals.module';
 import { AvailabilityModule } from '@/modules/availability/availability.module';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
+import { WaitlistModule } from '@/modules/waitlist/waitlist.module';
 import { SubscriptionsModule } from '@/modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from '@/modules/payments/payments.module';
 import { PushModule } from '@/modules/push/push.module';
@@ -43,6 +44,7 @@ import { AppointmentsJobs } from './appointments.jobs';
     ProfessionalsModule,
     AvailabilityModule,
     NotificationsModule,
+    WaitlistModule,
     SubscriptionsModule,
     PaymentsModule,
     PushModule,

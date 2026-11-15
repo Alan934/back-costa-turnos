@@ -10,11 +10,33 @@ import {
   Matches,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { DepositMode } from '@/common/enums';
 import { IsEnum } from 'class-validator';
 import { TitleCase } from '@/common/decorators/title-case.decorator';
 import type { PublicPageSettings } from '../entities/professional.entity';
+
+/** Respuesta de GET /professionals/slug-availability. */
+export class SlugAvailabilityDto {
+  @ApiProperty({ example: 'mi-peluqueria', description: 'slug consultado (normalizado)' })
+  slug!: string;
+
+  @ApiProperty({ type: Boolean, description: 'false si no es kebab-case (a-z, 0-9, guiones)' })
+  valid!: boolean;
+
+  @ApiProperty({ type: Boolean, description: 'true si nadie lo usa (profesional ni comercio)' })
+  available!: boolean;
+
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    example: ['mi-peluqueria-2', 'mi-peluqueria-3'],
+    description: 'alternativas libres cuando está tomado',
+  })
+  suggestions!: string[];
+}
 
 export class OnboardProfessionalDto {
   @ApiProperty({ example: 'Peluqueria Mi Pueblo' })
@@ -41,7 +63,33 @@ export class OnboardProfessionalDto {
   address?: string;
 }
 
+export class NotificationPrefsDto {
+  @ApiPropertyOptional({ type: Boolean, description: 'Avisos por email (default: activado)' })
+  @IsOptional()
+  @IsBoolean()
+  email?: boolean;
+
+  @ApiPropertyOptional({ type: Boolean, description: 'Avisos en el celular (default: activado)' })
+  @IsOptional()
+  @IsBoolean()
+  push?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'Resumen de los turnos del día, a la mañana (default: activado)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  dailySummary?: boolean;
+}
+
 export class UpdateProfessionalDto {
+  @ApiPropertyOptional({ type: NotificationPrefsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NotificationPrefsDto)
+  notificationPrefs?: NotificationPrefsDto;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -96,6 +144,14 @@ export class UpdateProfessionalDto {
   @IsInt()
   @Min(0)
   rescheduleWindowHours?: number;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: 'El recordatorio del día anterior le pide al cliente que confirme o avise que no va.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  askConfirmation?: boolean;
 
   @ApiPropertyOptional({
     type: 'object',

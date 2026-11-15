@@ -8,9 +8,11 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { TenantGuard } from '@/common/guards/tenant.guard';
@@ -24,6 +26,7 @@ import { Staff } from './entities/staff.entity';
 import {
   CreateStaffDto,
   OnboardProfessionalDto,
+  SlugAvailabilityDto,
   UpdateProfessionalDto,
   UpdateStaffDto,
 } from './dto/professional.dto';
@@ -43,6 +46,20 @@ export class ProfessionalsController {
   @Post('onboard')
   onboard(@CurrentAccount('sub') accountId: string, @Body() dto: OnboardProfessionalDto) {
     return this.professionals.onboard(accountId, dto);
+  }
+
+  /** Chequeo en vivo del enlace público durante el onboarding (cuenta aún sin tenant). */
+  @ApiOperation({
+    summary: 'Disponibilidad de un enlace público (slug)',
+    description: 'Mira profesionales y comercios. Si está tomado, sugiere alternativas libres.',
+  })
+  @ApiQuery({ name: 'slug', type: String })
+  @ApiResponse({ status: 200, type: SlugAvailabilityDto })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('slug-availability')
+  slugAvailability(@Query('slug') slug?: string): Promise<SlugAvailabilityDto> {
+    return this.professionals.checkSlug(typeof slug === 'string' ? slug : '');
   }
 
   @ApiOperation({ summary: 'Obtener el professional propio' })
@@ -66,6 +83,21 @@ export class ProfessionalsController {
   @Patch('me')
   updateMine(@CurrentTenant() tenantId: string, @Body() dto: UpdateProfessionalDto) {
     return this.professionals.update(tenantId, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Marcar las novedades del Inicio como vistas',
+    description: 'Setea `newsSeenAt` en ahora. Vale para todos los dispositivos del profesional.',
+  })
+  @ApiResponse({ status: 200, type: Professional })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Sin permisos' })
+  @UseGuards(RolesGuard, TenantGuard)
+  @Roles(AppRole.Professional)
+  @HttpCode(HttpStatus.OK)
+  @Post('me/news-seen')
+  markNewsSeen(@CurrentTenant() tenantId: string) {
+    return this.professionals.markNewsSeen(tenantId);
   }
 
   // ---- Staff ----

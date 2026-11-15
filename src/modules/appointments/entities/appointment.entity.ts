@@ -187,6 +187,34 @@ export class Appointment extends BaseEntity {
   @Column({ name: 'public_token', type: 'text', nullable: true })
   publicToken!: string | null;
 
+  /**
+   * Token opaco del link "gestionar mi turno" (/turno/:token) que va en el email de
+   * confirmación: permite ver, cancelar y reprogramar SIN cuenta. Es distinto de
+   * `publicToken` (ese existe solo desde el check-in y abre la sala de espera). Se genera
+   * al reservar; null en turnos anteriores a esta función y en entradas de sala.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @Index('idx_appointment_manage_token', { unique: true, where: 'manage_token IS NOT NULL' })
+  @Column({ name: 'manage_token', type: 'text', nullable: true })
+  manageToken!: string | null;
+
+  /**
+   * Turno fijo: los turnos creados juntos al "repetir cada N semanas" comparten este id
+   * (permite cancelar "este y los siguientes"). Null en un turno suelto.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Serie de turnos fijos' })
+  @Index('idx_appointment_series', { where: 'series_id IS NOT NULL' })
+  @Column({ name: 'series_id', type: 'uuid', nullable: true })
+  seriesId!: string | null;
+
+  /**
+   * Cuándo el cliente confirmó que va (desde el recordatorio o porque el profesional lo marcó).
+   * Null = no confirmó. Se borra al cambiar el horario del turno.
+   */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'client_confirmed_at', type: 'timestamptz', nullable: true })
+  clientConfirmedAt!: Date | null;
+
   @ApiProperty({ enum: CreatedVia, enumName: 'CreatedVia' })
   @Column({
     name: 'created_via',
@@ -217,6 +245,15 @@ export class Appointment extends BaseEntity {
 
   @ApiPropertyOptional({ description: 'Nombre del servicio del turno' })
   serviceName?: string;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'Precio estimado del turno en centavos: precio del servicio + adicionales (con su ' +
+      'descuento; gratis = 0). Null si no tiene servicio asignado. Solo en el listado.',
+  })
+  priceCents?: number | null;
 
   @ApiPropertyOptional({
     description: 'Nombre del profesional asignado (se completa al reservar con "cualquiera").',

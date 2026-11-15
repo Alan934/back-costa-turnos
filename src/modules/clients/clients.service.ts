@@ -1,10 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { AppointmentStatus, ProfessionalClientStatus } from '@/common/enums';
 import { PersonsService } from '@/modules/identity/persons.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
-import { Professional } from '@/modules/professionals/entities/professional.entity';
 import { ProfessionalClient } from './entities/professional-client.entity';
 import { FichaField } from './entities/ficha-field.entity';
 import { ClientNote } from './entities/client-note.entity';
@@ -20,7 +19,19 @@ import {
 interface VisitStats {
   count: number;
   last: Date | null;
+  /** Último turno pasado no cancelado ni ausente, con su servicio y quién atendió. */
+  lastAppointment: { startAt: Date; serviceId: string | null; staffId: string } | null;
+  /** Próximo turno pendiente. */
+  next: Date | null;
 }
+
+/** Turnos que no cuentan como "vino" ni como "tiene turno". */
+const NOT_ATTENDED = [AppointmentStatus.Cancelled, AppointmentStatus.NoShow];
+const PENDING = [
+  AppointmentStatus.Requested,
+  AppointmentStatus.Confirmed,
+  AppointmentStatus.InProgress,
+];
 
 @Injectable()
 export class ClientsService {
@@ -33,8 +44,6 @@ export class ClientsService {
     private readonly notes: Repository<ClientNote>,
     @InjectRepository(Appointment)
     private readonly appointments: Repository<Appointment>,
-    @InjectRepository(Professional)
-    private readonly professionals: Repository<Professional>,
     private readonly persons: PersonsService,
   ) {}
 
@@ -95,36 +104,35 @@ export class ClientsService {
   // ---- Clients (membership) ----
   /** Lista de clientes con datos de la persona embebidos. `q` busca por nombre/email/telefono. */
   async listClients(tenantId: string, q?: string): Promise<EnrichedClientDto[]> {
-    const all = await this.clients.find({
-      where: { professionalId: tenantId },
-      relations: { person: true },
-      order: { createdAt: 'DESC' },
-    });
+    const qb = this.clients
+      .createQueryBuilder('c')
+      .leftJoinAndSelect('c.person', 'person')
+      .where('c.professional_id = :tenantId', { tenantId })
+      // El dueño nunca es cliente de sí mismo: excluir las membresías cuya persona
+      // pertenezca a la cuenta del propio profesional (identidad cuenta↔Person es 1:N,
+      // por eso filtramos por accountId y no por una sola persona "canónica").
+      .andWhere(
+        'person.account_id IS DISTINCT FROM (SELECT p.account_id FROM professional p WHERE p.id = :tenantId)',
+      )
+      .orderBy('c.created_at', 'DESC')
+      .addOrderBy('c.id', 'DESC');
 
-    // El dueño nunca es cliente de sí mismo: excluir las membresías cuya persona
-    // pertenezca a la cuenta del propio profesional (identidad cuenta↔Person es 1:N,
-    // por eso filtramos por accountId y no por una sola persona "canónica").
-    const professional = await this.professionals.findOne({ where: { id: tenantId } });
-    const ownerAccountId = professional?.accountId ?? null;
-    const ownPortfolio = ownerAccountId
-      ? all.filter((c) => c.person?.accountId !== ownerAccountId)
-      : all;
-
+    // Búsqueda en la base (antes se traía toda la cartera y se filtraba en memoria). `strpos`
+    // en vez de LIKE: el término es literal, sin comodines que escapar.
     const term = q?.trim().toLowerCase();
-    const filtered = term
-      ? ownPortfolio.filter((c) => {
-          const p = c.person;
-          return [p?.fullName, p?.email, p?.phone]
-            .filter(Boolean)
-            .some((v) => v!.toLowerCase().includes(term));
-        })
-      : ownPortfolio;
+    if (term) {
+      qb.andWhere(
+        `(strpos(lower(coalesce(person.full_name, '')), :term) > 0
+          OR strpos(lower(coalesce(person.email, '')), :term) > 0
+          OR strpos(lower(coalesce(person.phone, '')), :term) > 0)`,
+        { term },
+      );
+    }
+    const clients = await qb.getMany();
 
-    const visits = await this.computeVisits(
-      tenantId,
-      filtered.map((c) => c.personId),
-    );
-    return filtered.map((c) => this.toEnriched(c, visits.get(c.personId)));
+    // Sin búsqueda es toda la cartera: se agregan los turnos de todo el tenant de una.
+    const visits = await this.computeVisits(tenantId, term ? clients.map((c) => c.personId) : null);
+    return clients.map((c) => this.toEnriched(c, visits.get(c.personId)));
   }
 
   /** Detalle de un cliente, enriquecido. */
@@ -144,24 +152,71 @@ export class ClientsService {
     return client;
   }
 
-  /** visitCount/lastVisitAt por persona, contando turnos atendidos (done) del tenant. */
+  /**
+   * Por persona: visitas atendidas (done) y la última; el último turno que ya pasó (no
+   * cancelado ni ausente, aunque no esté marcado como atendido) y el próximo pendiente.
+   *
+   * Se agrega en la base, una fila por persona (antes se traían todos los turnos de la cartera
+   * y se recorrían en memoria). `personIds = null` = toda la cartera del tenant.
+   */
   private async computeVisits(
     tenantId: string,
-    personIds: string[],
+    personIds: string[] | null,
   ): Promise<Map<string, VisitStats>> {
-    const ids = [...new Set(personIds)];
     const map = new Map<string, VisitStats>();
-    if (ids.length === 0) return map;
+    const ids = personIds ? [...new Set(personIds)] : null;
+    if (ids && ids.length === 0) return map;
 
-    const done = await this.appointments.find({
-      where: { professionalId: tenantId, personId: In(ids), status: AppointmentStatus.Done },
-      select: ['personId', 'startAt'],
-    });
-    for (const a of done) {
-      const cur = map.get(a.personId) ?? { count: 0, last: null };
-      cur.count += 1;
-      if (!cur.last || a.startAt > cur.last) cur.last = a.startAt;
-      map.set(a.personId, cur);
+    const qb = this.appointments
+      .createQueryBuilder('a')
+      .select('a.person_id', 'personId')
+      .addSelect(`count(*) FILTER (WHERE a.status = :done)`, 'count')
+      .addSelect(`max(a.start_at) FILTER (WHERE a.status = :done)`, 'last')
+      .addSelect(
+        `(array_agg(a.start_at ORDER BY a.start_at DESC, a.id DESC) FILTER (WHERE a.start_at <= :now))[1]`,
+        'lastStartAt',
+      )
+      .addSelect(
+        `(array_agg(a.service_id ORDER BY a.start_at DESC, a.id DESC) FILTER (WHERE a.start_at <= :now))[1]`,
+        'lastServiceId',
+      )
+      .addSelect(
+        `(array_agg(a.staff_id ORDER BY a.start_at DESC, a.id DESC) FILTER (WHERE a.start_at <= :now))[1]`,
+        'lastStaffId',
+      )
+      .addSelect(
+        `min(a.start_at) FILTER (WHERE a.start_at > :now AND a.status IN (:...pending))`,
+        'next',
+      )
+      .where('a.professional_id = :tenantId', { tenantId })
+      .andWhere('a.status NOT IN (:...notAttended)')
+      .setParameters({
+        done: AppointmentStatus.Done,
+        now: new Date(),
+        pending: PENDING,
+        notAttended: NOT_ATTENDED,
+      })
+      .groupBy('a.person_id');
+    if (ids) qb.andWhere('a.person_id IN (:...ids)', { ids });
+
+    const rows = await qb.getRawMany<{
+      personId: string;
+      count: string;
+      last: Date | null;
+      lastStartAt: Date | null;
+      lastServiceId: string | null;
+      lastStaffId: string | null;
+      next: Date | null;
+    }>();
+    for (const r of rows) {
+      map.set(r.personId, {
+        count: Number(r.count),
+        last: r.last,
+        lastAppointment: r.lastStartAt
+          ? { startAt: r.lastStartAt, serviceId: r.lastServiceId, staffId: r.lastStaffId! }
+          : null,
+        next: r.next,
+      });
     }
     return map;
   }
@@ -180,6 +235,10 @@ export class ClientsService {
       phone: p?.phone ?? null,
       visitCount: visits?.count ?? 0,
       lastVisitAt: visits?.last ? visits.last.toISOString() : null,
+      lastAppointmentAt: visits?.lastAppointment?.startAt.toISOString() ?? null,
+      lastServiceId: visits?.lastAppointment?.serviceId ?? null,
+      lastStaffId: visits?.lastAppointment?.staffId ?? null,
+      nextAppointmentAt: visits?.next ? visits.next.toISOString() : null,
     };
   }
 
@@ -225,6 +284,13 @@ export class ClientsService {
   async archiveClient(tenantId: string, id: string): Promise<EnrichedClientDto> {
     const client = await this.getClient(tenantId, id);
     client.status = ProfessionalClientStatus.Archived;
+    await this.clients.save(client);
+    return this.getClientEnriched(tenantId, id);
+  }
+
+  async restoreClient(tenantId: string, id: string): Promise<EnrichedClientDto> {
+    const client = await this.getClient(tenantId, id);
+    client.status = ProfessionalClientStatus.Active;
     await this.clients.save(client);
     return this.getClientEnriched(tenantId, id);
   }

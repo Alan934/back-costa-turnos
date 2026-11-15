@@ -125,6 +125,21 @@ export class MailerService {
           }),
         };
       }
+      case VerificationPurpose.Otp:
+        return {
+          subject: `Tu código para ingresar a ${BRAND}: ${code}`,
+          text:
+            `Tu código para ingresar es: ${code}\n` +
+            `Ingresalo en la pantalla de ingreso. (Vence en pocos minutos. ` +
+            `Si no fuiste vos, ignorá este mensaje: nadie puede entrar sin el código.)`,
+          html: this.htmlTemplate({
+            title: 'Tu código para ingresar',
+            intro: 'Usá este código para ingresar, sin contraseña:',
+            cta: null,
+            link: null,
+            code,
+          }),
+        };
       case VerificationPurpose.EmailVerify:
       default:
         return {

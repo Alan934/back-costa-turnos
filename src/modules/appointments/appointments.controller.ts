@@ -11,9 +11,14 @@ import { AppointmentsService } from './appointments.service';
 import { Appointment } from './entities/appointment.entity';
 import {
   BookAppointmentDto,
+  BookSeriesDto,
+  BookSeriesResultDto,
   BookWithDepositDto,
   BookWithDepositResultDto,
   CancelAppointmentDto,
+  ListAppointmentsQueryDto,
+  RescheduleAppointmentDto,
+  SetClientConfirmedDto,
   CompleteAppointmentDto,
 } from './dto/appointment.dto';
 import {
@@ -34,14 +39,19 @@ import {
 export class AppointmentsController {
   constructor(private readonly appointments: AppointmentsService) {}
 
-  @ApiOperation({ summary: 'Listar turnos del tenant' })
-  @ApiQuery({ name: 'staffId', required: false })
+  @ApiOperation({
+    summary: 'Listar turnos del tenant',
+    description:
+      'Con `from`/`to` devuelve los turnos que empiezan en ese rango (máx. 100 días). Sin rango, ' +
+      'los próximos desde hoy (zona del profesional).',
+  })
   @ApiResponse({ status: 200, type: Appointment, isArray: true })
+  @ApiResponse({ status: 400, description: 'Rango inválido' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @Get()
-  list(@CurrentTenant() tenantId: string, @Query('staffId') staffId?: string) {
-    return this.appointments.list(tenantId, staffId);
+  list(@CurrentTenant() tenantId: string, @Query() query: ListAppointmentsQueryDto) {
+    return this.appointments.list(tenantId, query);
   }
 
   @ApiOperation({ summary: 'Reservar un turno' })
@@ -53,6 +63,20 @@ export class AppointmentsController {
   @Post()
   book(@CurrentTenant() tenantId: string, @Body() dto: BookAppointmentDto) {
     return this.appointments.book(tenantId, dto, CreatedVia.Professional);
+  }
+
+  @ApiOperation({
+    summary: 'Turno fijo: el mismo turno cada N semanas',
+    description:
+      'Crea `count` turnos separados por `everyWeeks` semanas. Las fechas que no se pueden dar ' +
+      '(feriado, vacaciones, bloqueo u otro turno) se devuelven en `skipped` con el motivo.',
+  })
+  @ApiResponse({ status: 201, type: BookSeriesResultDto })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 409, description: 'No se pudo dar ninguna fecha' })
+  @Post('series')
+  bookSeries(@CurrentTenant() tenantId: string, @Body() dto: BookSeriesDto) {
+    return this.appointments.bookSeries(tenantId, dto);
   }
 
   @ApiOperation({ summary: 'Reservar un turno pagando la sena' })
@@ -290,6 +314,33 @@ export class AppointmentsController {
     return this.appointments.noShow(tenantId, id);
   }
 
+  @ApiOperation({ summary: 'Marcar que el cliente confirmó que va (o desmarcarlo)' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'El turno ya está cerrado' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/client-confirmed')
+  setClientConfirmed(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: SetClientConfirmedDto,
+  ) {
+    return this.appointments.setClientConfirmed(tenantId, id, dto.confirmed);
+  }
+
+  @ApiOperation({ summary: 'Cambiar el horario de un turno (lo hace el profesional)' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'El turno ya empezó o el horario ya pasó' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @ApiResponse({ status: 409, description: 'El horario nuevo está ocupado' })
+  @Post(':id/reschedule')
+  reschedule(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: RescheduleAppointmentDto,
+  ) {
+    return this.appointments.reschedule(tenantId, id, dto);
+  }
+
   @ApiOperation({ summary: 'Cancelar un turno' })
   @ApiResponse({ status: 201, type: Appointment })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
@@ -302,6 +353,6 @@ export class AppointmentsController {
     @Param('id') id: string,
     @Body() dto: CancelAppointmentDto,
   ) {
-    return this.appointments.cancel(tenantId, id, dto.reason);
+    return this.appointments.cancel(tenantId, id, dto.reason, dto.includeFollowing === true);
   }
 }

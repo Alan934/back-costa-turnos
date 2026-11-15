@@ -38,4 +38,29 @@ export class EnrichedClientDto {
 
   @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
   lastVisitAt!: string | null;
+
+  /**
+   * Último turno que ya pasó y no se canceló ni faltó (atendido o no marcado). Sirve para
+   * "no viene hace X semanas" aunque el profesional no marque los turnos como atendidos.
+   */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  lastAppointmentAt!: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Servicio de ese último turno (para "darle el mismo turno")',
+  })
+  lastServiceId!: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Quién lo atendió' })
+  lastStaffId!: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Próximo turno pendiente (null = no tiene ninguno reservado)',
+  })
+  nextAppointmentAt!: string | null;
 }

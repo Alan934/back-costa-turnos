@@ -19,7 +19,7 @@ import { CurrentTenant } from '@/common/decorators/current-tenant.decorator';
 import { AppRole } from '@/common/enums';
 import { WaitlistService } from './waitlist.service';
 import { WaitlistEntry } from './entities/waitlist-entry.entity';
-import { CreateWaitlistDto } from './dto/waitlist.dto';
+import { CreateWaitlistDto, WaitlistItemDto } from './dto/waitlist.dto';
 
 @ApiTags('waitlist')
 @ApiBearerAuth()
@@ -29,8 +29,8 @@ import { CreateWaitlistDto } from './dto/waitlist.dto';
 export class WaitlistController {
   constructor(private readonly waitlist: WaitlistService) {}
 
-  @ApiOperation({ summary: 'Listar entradas de lista de espera' })
-  @ApiResponse({ status: 200, type: WaitlistEntry, isArray: true })
+  @ApiOperation({ summary: 'Lista de espera vigente (días que no pasaron), con contacto y servicio' })
+  @ApiResponse({ status: 200, type: WaitlistItemDto, isArray: true })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @Get()

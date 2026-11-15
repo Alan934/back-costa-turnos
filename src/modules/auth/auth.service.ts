@@ -32,6 +32,7 @@ import { VerificationTokenService } from './verification-token.service';
 import {
   AuthMeDto,
   ClaimAccountDto,
+  LoginCodeDto,
   LoginDto,
   RegisterComercialDto,
   RegisterDto,
@@ -143,7 +144,12 @@ export class AuthService {
     // lo expone /auth/me). Permite al front filtrar de forma fiable al dueño de su
     // propia cartera sin depender del email.
     const person = await this.persons.findByAccountId(accountId);
-    return { ...payload, personId: person?.id };
+    return {
+      ...payload,
+      personId: person?.id,
+      fullName: person?.fullName ?? undefined,
+      phone: person?.phone ?? undefined,
+    };
   }
 
   /**
@@ -268,7 +274,18 @@ export class AuthService {
       accountId: account.id,
     });
 
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
+  }
+
+  /**
+   * Manda el código de verificación de email apenas se crea la cuenta, sin esperar a que la
+   * persona lo pida desde el aviso. NO bloquea ni hace fallar el registro: si el mail no
+   * sale, queda el aviso "Verificá tu email" para reintentarlo.
+   */
+  private sendWelcomeVerification(account: Account): void {
+    if (account.emailVerifiedAt) return; // reclamó con código o vino por Google
+    void this.requestCode(account.email, VerificationPurpose.EmailVerify).catch(() => undefined);
   }
 
   /**
@@ -277,6 +294,13 @@ export class AuthService {
    * El token resultante ya trae rol professional y su comercio personal.
    */
   async registerProfessional(dto: RegisterProfessionalDto): Promise<IssuedTokens> {
+    // El slug se valida ANTES de crear la cuenta: si se chequeaba recién en el onboard, un
+    // slug tomado dejaba la cuenta creada a medias (sin negocio) y el reintento fallaba con
+    // "ya existe una cuenta con ese email".
+    const slugCheck = await this.professionalsService.checkSlug(dto.slug);
+    if (!slugCheck.available) {
+      throw new ConflictException({ message: 'El slug ya esta en uso', error: 'slug_taken' });
+    }
     const existing = await this.assertCanRegisterOver(dto.email, dto.verificationCode);
     const passwordHash = await argon2.hash(dto.password);
     let account: Account;
@@ -306,6 +330,7 @@ export class AuthService {
       address: dto.address,
     });
 
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
   }
 
@@ -319,6 +344,7 @@ export class AuthService {
     const comercio = await this.comercios.createComercialWithComercio(dto);
     const account = await this.accounts.findById(comercio.accountId!);
     if (!account) throw new BadRequestException('No se pudo crear la cuenta del comercial');
+    this.sendWelcomeVerification(account);
     return this.issueAndPersist(account);
   }
 
@@ -343,6 +369,37 @@ export class AuthService {
     this.assertActive(account);
 
     await this.redis.del(failKey).catch(() => undefined);
+    return this.issueAndPersist(account);
+  }
+
+  /**
+   * Ingreso SIN contraseña, paso 1: manda un código de un solo uso al email. Solo si la
+   * cuenta existe y no está bloqueada; la respuesta del endpoint es siempre la misma, así
+   * que no revela si un email está registrado.
+   */
+  async requestLoginCode(email: string): Promise<void> {
+    const account = await this.accounts.findByEmail(email);
+    if (!account || account.status === AccountStatus.Blocked) return;
+    await this.requestCode(email, VerificationPurpose.Otp);
+  }
+
+  /**
+   * Ingreso SIN contraseña, paso 2: canjea el código por una sesión. Recibir el código
+   * prueba el control del email, así que además deja el email verificado y, si la cuenta la
+   * había creado un tercero (pendiente de activar), la activa (misma prueba que el reclamo).
+   */
+  async loginWithCode(dto: LoginCodeDto): Promise<IssuedTokens> {
+    const token = await this.verification.consume(dto.email, VerificationPurpose.Otp, dto.code);
+    if (!token) throw new BadRequestException('Codigo invalido o vencido');
+    const account = await this.accounts.findByEmail(dto.email);
+    if (!account) throw new BadRequestException('Codigo invalido o vencido');
+    this.assertActive(account);
+
+    if (!account.isClaimed || !account.emailVerifiedAt) {
+      account.isClaimed = true;
+      account.emailVerifiedAt ??= new Date();
+      await this.accounts.save(account);
+    }
     return this.issueAndPersist(account);
   }
 
@@ -416,11 +473,12 @@ export class AuthService {
         // Si la cuenta tenía password pero NUNCA se verificó el email, quien la creó pudo no
         // ser el dueño del mail (pre-registro malicioso). Google sí verifica el email, así que
         // se lo vincula pero se descartan la password y las sesiones previas.
-        if (!account.emailVerifiedAt && account.passwordHash) {
+        // (Se calcula ANTES de limpiar la password: si no, nunca se cerraban las sesiones.)
+        const wiped = !account.emailVerifiedAt && !!account.passwordHash;
+        if (wiped) {
           account.passwordHash = null;
           account.refreshTokenHash = null;
         }
-        const wiped = !account.emailVerifiedAt && !!account.passwordHash;
         account.googleId = profile.googleId;
         account.isClaimed = true;
         account.emailVerifiedAt ??= new Date();

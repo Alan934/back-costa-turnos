@@ -3,10 +3,13 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IdentityModule } from '@/modules/identity/identity.module';
+import { PushModule } from '@/modules/push/push.module';
 import { MailConfig } from '@/config/configuration';
 import { Professional } from '@/modules/professionals/entities/professional.entity';
+import { Appointment } from '@/modules/appointments/entities/appointment.entity';
 import { Notification } from './entities/notification.entity';
 import { NotificationsService } from './notifications.service';
+import { DailySummaryService } from './daily-summary.service';
 import { NotificationsProcessor } from './notifications.processor';
 import { NotificationsController } from './notifications.controller';
 import { NOTIFICATIONS_QUEUE } from './notifications.constants';
@@ -17,13 +20,15 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, Professional]),
+    TypeOrmModule.forFeature([Notification, Professional, Appointment]),
     BullModule.registerQueue({ name: NOTIFICATIONS_QUEUE }),
     IdentityModule,
+    PushModule,
   ],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
+    DailySummaryService,
     NotificationsProcessor,
     EmailStubSender,
     SmtpEmailSender,
@@ -44,6 +49,6 @@ import { WhatsappStubSender } from './senders/whatsapp-stub.sender';
       inject: [ConfigService, EmailStubSender, SmtpEmailSender, WhatsappStubSender],
     },
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, DailySummaryService],
 })
 export class NotificationsModule {}

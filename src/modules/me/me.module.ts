@@ -8,14 +8,17 @@ import { Person } from '@/modules/identity/entities/person.entity';
 import { Membership } from '@/modules/comercios/entities/membership.entity';
 import { NotificationsModule } from '@/modules/notifications/notifications.module';
 import { MeService } from './me.service';
+import { WaitlistModule } from '@/modules/waitlist/waitlist.module';
 import { MeController } from './me.controller';
+import { ManageAppointmentController } from './manage-appointment.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Appointment, Service, Staff, Professional, Person, Membership]),
     NotificationsModule,
+    WaitlistModule,
   ],
-  controllers: [MeController],
+  controllers: [MeController, ManageAppointmentController],
   providers: [MeService],
 })
 export class MeModule {}

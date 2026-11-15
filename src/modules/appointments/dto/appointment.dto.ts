@@ -1,13 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
+  IsInt,
   IsEnum,
   IsISO8601,
   IsOptional,
   IsString,
   IsNotEmpty,
   IsUUID,
+  Max,
+  Min,
 } from 'class-validator';
 import { CancellationReason, CashOutcome, PaymentMethod, PaymentOption } from '@/common/enums';
 import { IsPhone, PHONE_DESCRIPTION } from '@/common/decorators/phone.decorator';
@@ -162,11 +166,104 @@ export class CompleteAppointmentDto {
   note?: string;
 }
 
+/** Filtros del listado de turnos de la agenda del profesional. */
+export class ListAppointmentsQueryDto {
+  @ApiPropertyOptional({ description: 'Solo los turnos de este staff' })
+  @IsOptional()
+  @IsString()
+  staffId?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-15T03:00:00.000Z',
+    description: 'Turnos que empiezan desde este instante (ISO 8601, inclusive)',
+  })
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-16T02:59:59.999Z',
+    description: 'Turnos que empiezan hasta este instante (ISO 8601, inclusive)',
+  })
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
+}
+
 export class CancelAppointmentDto {
   @ApiPropertyOptional({ enum: CancellationReason })
   @IsOptional()
   @IsEnum(CancellationReason)
   reason?: CancellationReason;
+
+  @ApiPropertyOptional({
+    description: 'Turno fijo: cancela también los turnos siguientes de la misma serie',
+  })
+  @IsOptional()
+  @IsBoolean()
+  includeFollowing?: boolean;
+}
+
+/** Turnos fijos: el mismo turno repetido cada `everyWeeks` semanas, `count` veces en total. */
+export class BookSeriesDto extends BookAppointmentDto {
+  @ApiProperty({ minimum: 1, maximum: 4, example: 1, description: 'Cada cuántas semanas' })
+  @IsInt()
+  @Min(1)
+  @Max(4)
+  everyWeeks!: number;
+
+  @ApiProperty({
+    minimum: 2,
+    maximum: 52,
+    example: 8,
+    description: 'Cuántos turnos en total (incluye el primero)',
+  })
+  @IsInt()
+  @Min(2)
+  @Max(52)
+  count!: number;
+}
+
+/** Fecha de un turno fijo que no se pudo dar, con el motivo para mostrarle al profesional. */
+export class SkippedOccurrenceDto {
+  @ApiProperty({ example: '2026-12-08T21:00:00.000Z' })
+  startAt!: string;
+
+  @ApiProperty({ example: 'Feriado: Inmaculada Concepción' })
+  reason!: string;
+}
+
+export class BookSeriesResultDto {
+  @ApiProperty({ description: 'Id que comparten los turnos de la serie' })
+  seriesId!: string;
+
+  @ApiProperty({ type: [Appointment] })
+  created!: Appointment[];
+
+  @ApiProperty({ type: [SkippedOccurrenceDto] })
+  skipped!: SkippedOccurrenceDto[];
+}
+
+/** El profesional marca que el cliente confirmó que va (o lo desmarca). */
+export class SetClientConfirmedDto {
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  confirmed!: boolean;
+}
+
+/** El profesional cambia el horario de un turno (mismo cliente, servicio y duración). */
+export class RescheduleAppointmentDto {
+  @ApiProperty({ example: '2026-06-10T13:00:00Z' })
+  @IsISO8601()
+  startAt!: string;
+
+  @ApiPropertyOptional({
+    default: true,
+    description: 'Mandarle al cliente un email con el horario nuevo (si tiene email)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  notifyClient?: boolean;
 }
 
 /**
