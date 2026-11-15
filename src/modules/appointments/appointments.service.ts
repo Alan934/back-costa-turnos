@@ -12,7 +12,15 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, EntityManager, In, MoreThan, Repository } from 'typeorm';
+import {
+  Between,
+  EntityManager,
+  FindOptionsWhere,
+  In,
+  MoreThan,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { DateTime } from 'luxon';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -62,6 +70,7 @@ import {
   BookSeriesResultDto,
   BookWithDepositDto,
   ClientRefDto,
+  ListAppointmentsQueryDto,
   RescheduleAppointmentDto,
   SkippedOccurrenceDto,
 } from './dto/appointment.dto';
@@ -96,6 +105,11 @@ const TERMINAL_STATUSES = [
 
 /** Cuántas veces puede un cliente usar "me voy y vuelvo" (que no sea una excusa para no esperar). */
 const MAX_AWAYS = 2;
+
+/** Rango máximo del listado de la agenda (la vista mensual pide ~6 semanas). */
+const LIST_MAX_RANGE_DAYS = 100;
+/** Tope de filas del listado: holgado para un mes de un local con varias sillas. */
+const LIST_MAX_ROWS = 3000;
 
 // Métodos de cobro fuera del sistema (efectivo, transferencia/QR): precio base sin IVA,
 // turno fijo, el profesional confirma el cobro en persona (cierre de caja).
@@ -1291,11 +1305,31 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     return appointment;
   }
 
-  async list(tenantId: string, staffId?: string): Promise<Appointment[]> {
+  /**
+   * Turnos de la agenda. Siempre acotado por fecha de inicio: con `from`/`to` el rango pedido
+   * (máx. {@link LIST_MAX_RANGE_DAYS} días); sin `from`, desde hace 24 h. Antes no había rango y
+   * con `take` + orden ascendente devolvía los turnos MÁS VIEJOS: pasado el tope, la agenda de
+   * hoy quedaba vacía.
+   */
+  async list(tenantId: string, query: ListAppointmentsQueryDto = {}): Promise<Appointment[]> {
+    const from = query.from ? new Date(query.from) : new Date(Date.now() - 86_400_000);
+    const to = query.to ? new Date(query.to) : null;
+    if (to && to < from) {
+      throw new BadRequestException('El fin del rango no puede ser anterior al inicio');
+    }
+    if (to && to.getTime() - from.getTime() > LIST_MAX_RANGE_DAYS * 86_400_000) {
+      throw new BadRequestException(`El rango no puede superar ${LIST_MAX_RANGE_DAYS} días`);
+    }
+
+    const where: FindOptionsWhere<Appointment> = {
+      professionalId: tenantId,
+      ...(query.staffId ? { staffId: query.staffId } : {}),
+      startAt: to ? Between(from, to) : MoreThanOrEqual(from),
+    };
     const appts = await this.appointments.find({
-      where: { professionalId: tenantId, ...(staffId ? { staffId } : {}) },
+      where,
       order: { startAt: 'ASC' },
-      take: 500,
+      take: LIST_MAX_ROWS,
     });
     if (appts.length === 0) return appts;
 

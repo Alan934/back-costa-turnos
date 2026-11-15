@@ -166,6 +166,30 @@ export class CompleteAppointmentDto {
   note?: string;
 }
 
+/** Filtros del listado de turnos de la agenda del profesional. */
+export class ListAppointmentsQueryDto {
+  @ApiPropertyOptional({ description: 'Solo los turnos de este staff' })
+  @IsOptional()
+  @IsString()
+  staffId?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-15T03:00:00.000Z',
+    description: 'Turnos que empiezan desde este instante (ISO 8601, inclusive)',
+  })
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-11-16T02:59:59.999Z',
+    description: 'Turnos que empiezan hasta este instante (ISO 8601, inclusive)',
+  })
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
+}
+
 export class CancelAppointmentDto {
   @ApiPropertyOptional({ enum: CancellationReason })
   @IsOptional()

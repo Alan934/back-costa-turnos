@@ -16,6 +16,7 @@ import {
   BookWithDepositDto,
   BookWithDepositResultDto,
   CancelAppointmentDto,
+  ListAppointmentsQueryDto,
   RescheduleAppointmentDto,
   SetClientConfirmedDto,
   CompleteAppointmentDto,
@@ -38,14 +39,19 @@ import {
 export class AppointmentsController {
   constructor(private readonly appointments: AppointmentsService) {}
 
-  @ApiOperation({ summary: 'Listar turnos del tenant' })
-  @ApiQuery({ name: 'staffId', required: false })
+  @ApiOperation({
+    summary: 'Listar turnos del tenant',
+    description:
+      'Con `from`/`to` devuelve los turnos que empiezan en ese rango (máx. 100 días). Sin rango, ' +
+      'los próximos desde hoy (zona del profesional).',
+  })
   @ApiResponse({ status: 200, type: Appointment, isArray: true })
+  @ApiResponse({ status: 400, description: 'Rango inválido' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Sin permisos' })
   @Get()
-  list(@CurrentTenant() tenantId: string, @Query('staffId') staffId?: string) {
-    return this.appointments.list(tenantId, staffId);
+  list(@CurrentTenant() tenantId: string, @Query() query: ListAppointmentsQueryDto) {
+    return this.appointments.list(tenantId, query);
   }
 
   @ApiOperation({ summary: 'Reservar un turno' })
