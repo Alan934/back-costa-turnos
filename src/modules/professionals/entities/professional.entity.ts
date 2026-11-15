@@ -88,6 +88,15 @@ export class Professional extends BaseEntity {
   @Column({ name: 'reschedule_window_hours', type: 'integer', default: 24 })
   rescheduleWindowHours!: number;
 
+  /**
+   * Confirmación del día anterior: el recordatorio le pide al cliente "Confirmo / No puedo ir"
+   * (y "No puedo ir" libera el horario aunque esté dentro de la ventana de cancelación).
+   * Apagado por defecto.
+   */
+  @ApiProperty({ type: Boolean })
+  @Column({ name: 'ask_confirmation', type: 'boolean', default: false })
+  askConfirmation!: boolean;
+
   @ApiProperty({ type: 'object', additionalProperties: true })
   @Column({ name: 'public_page_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
   publicPageSettings!: PublicPageSettings;

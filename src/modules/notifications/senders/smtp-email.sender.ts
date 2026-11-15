@@ -79,6 +79,40 @@ export class SmtpEmailSender implements NotificationSender {
     switch (n.type) {
       case NotificationType.Booked: {
         const provisional = p.isProvisional === true;
+        const previous = str(p.previousWhenText);
+        if (previous) {
+          return {
+            subject: `Cambió el horario de tu turno: ${str(p.whenText) || 'nuevo horario'}`,
+            text: [
+              `${str(p.placeName) || 'El negocio'} cambió el horario de tu turno.`,
+              `Antes: ${previous}`,
+              `Ahora: ${str(p.whenText)}`,
+              '',
+              this.appointmentLines(p),
+              ...(p.willRemind === true ? ['', 'Te lo vamos a recordar el día anterior.'] : []),
+              this.manageLines(p),
+            ].join('\n'),
+          };
+        }
+        const seriesDates = Array.isArray(p.seriesDates)
+          ? p.seriesDates.map(str).filter(Boolean)
+          : [];
+        if (seriesDates.length > 1) {
+          return {
+            subject: `Tus turnos fijos en ${str(p.placeName) || 'el negocio'}`,
+            text: [
+              `Te reservamos ${seriesDates.length} turnos:`,
+              '',
+              ...seriesDates.map((d) => `• ${d}`),
+              '',
+              this.appointmentLines({ ...p, whenText: '' }),
+              '',
+              'Te vamos a recordar cada uno el día anterior.',
+              this.manageLines({ ...p, startAt: '', endAt: '' }),
+              '(Ese link es del primer turno; cada recordatorio trae el suyo.)',
+            ].join('\n'),
+          };
+        }
         return {
           subject: provisional
             ? `Turno provisional en ${str(p.placeName) || 'tu negocio'}`
@@ -94,7 +128,25 @@ export class SmtpEmailSender implements NotificationSender {
           ].join('\n'),
         };
       }
-      case NotificationType.Reminder:
+      case NotificationType.Reminder: {
+        const token = str(p.manageToken);
+        // El negocio pide confirmación: un toque para "voy" y otro para liberar el horario.
+        if (p.askConfirmation === true && token) {
+          const link = `${this.frontUrl}/turno/${token}`;
+          return {
+            subject: `¿Venís? Confirmá tu turno ${str(p.whenText) ? `del ${str(p.whenText)}` : 'de mañana'}`,
+            text: [
+              'Te recordamos tu turno:',
+              '',
+              this.appointmentLines(p),
+              '',
+              `¿Venís? Confirmalo con un toque: ${link}?r=si`,
+              `¿No podés venir? Avisanos acá y liberamos el horario para otra persona: ${link}?r=no`,
+              '',
+              `También podés reprogramarlo: ${link}`,
+            ].join('\n'),
+          };
+        }
         return {
           subject: `Recordatorio: tu turno es ${str(p.whenText) ? `el ${str(p.whenText)}` : 'mañana'}`,
           text: [
@@ -104,6 +156,7 @@ export class SmtpEmailSender implements NotificationSender {
             this.manageLines(p),
           ].join('\n'),
         };
+      }
       case NotificationType.Waitlist:
         return {
           subject: str(p.whenText) ? `Se liberó un turno: ${str(p.whenText)}` : 'Se liberó un turno',

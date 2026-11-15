@@ -45,6 +45,30 @@ export class ManageAppointmentController {
     return this.me.cancelByManageToken(token);
   }
 
+  @ApiOperation({ summary: 'Confirmar asistencia (pedido de confirmación del día anterior)' })
+  @ApiResponse({ status: 200, type: MyAppointmentDto })
+  @ApiResponse({ status: 400, description: 'El turno ya no se puede confirmar' })
+  @ApiResponse({ status: 404, description: 'Token inválido' })
+  @HttpCode(HttpStatus.OK)
+  @Post(':token/confirm')
+  confirm(@Param('token') token: string): Promise<MyAppointmentDto> {
+    return this.me.confirmByManageToken(token);
+  }
+
+  @ApiOperation({
+    summary: '"No puedo ir": cancela y libera el horario',
+    description:
+      'Si el negocio pide confirmación, se acepta aunque esté dentro de la ventana de cancelación.',
+  })
+  @ApiResponse({ status: 200, type: MyAppointmentDto })
+  @ApiResponse({ status: 404, description: 'Token inválido' })
+  @ApiResponse({ status: 409, description: 'Fuera de la ventana de cancelacion' })
+  @HttpCode(HttpStatus.OK)
+  @Post(':token/decline')
+  decline(@Param('token') token: string): Promise<MyAppointmentDto> {
+    return this.me.declineByManageToken(token);
+  }
+
   @ApiOperation({ summary: 'Reprogramar un turno por su link personal (dentro de la ventana)' })
   @ApiResponse({ status: 200, type: MyAppointmentDto })
   @ApiResponse({ status: 404, description: 'Token inválido' })

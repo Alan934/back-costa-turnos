@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { AppointmentStatus, ProfessionalClientStatus } from '@/common/enums';
 import { PersonsService } from '@/modules/identity/persons.service';
 import { Appointment } from '@/modules/appointments/entities/appointment.entity';
@@ -20,7 +20,19 @@ import {
 interface VisitStats {
   count: number;
   last: Date | null;
+  /** Último turno pasado no cancelado ni ausente, con su servicio y quién atendió. */
+  lastAppointment: { startAt: Date; serviceId: string | null; staffId: string } | null;
+  /** Próximo turno pendiente. */
+  next: Date | null;
 }
+
+/** Turnos que no cuentan como "vino" ni como "tiene turno". */
+const NOT_ATTENDED = [AppointmentStatus.Cancelled, AppointmentStatus.NoShow];
+const PENDING = [
+  AppointmentStatus.Requested,
+  AppointmentStatus.Confirmed,
+  AppointmentStatus.InProgress,
+];
 
 @Injectable()
 export class ClientsService {
@@ -144,7 +156,10 @@ export class ClientsService {
     return client;
   }
 
-  /** visitCount/lastVisitAt por persona, contando turnos atendidos (done) del tenant. */
+  /**
+   * Por persona: visitas atendidas (done) y la última; el último turno que ya pasó (no
+   * cancelado ni ausente, aunque no esté marcado como atendido) y el próximo pendiente.
+   */
   private async computeVisits(
     tenantId: string,
     personIds: string[],
@@ -153,14 +168,25 @@ export class ClientsService {
     const map = new Map<string, VisitStats>();
     if (ids.length === 0) return map;
 
-    const done = await this.appointments.find({
-      where: { professionalId: tenantId, personId: In(ids), status: AppointmentStatus.Done },
-      select: ['personId', 'startAt'],
+    const appts = await this.appointments.find({
+      where: { professionalId: tenantId, personId: In(ids), status: Not(In(NOT_ATTENDED)) },
+      select: ['personId', 'startAt', 'status', 'serviceId', 'staffId'],
     });
-    for (const a of done) {
-      const cur = map.get(a.personId) ?? { count: 0, last: null };
-      cur.count += 1;
-      if (!cur.last || a.startAt > cur.last) cur.last = a.startAt;
+    const now = Date.now();
+    for (const a of appts) {
+      const cur = map.get(a.personId) ?? { count: 0, last: null, lastAppointment: null, next: null };
+      if (a.status === AppointmentStatus.Done) {
+        cur.count += 1;
+        if (!cur.last || a.startAt > cur.last) cur.last = a.startAt;
+      }
+      const t = a.startAt.getTime();
+      if (t <= now) {
+        if (!cur.lastAppointment || a.startAt > cur.lastAppointment.startAt) {
+          cur.lastAppointment = { startAt: a.startAt, serviceId: a.serviceId, staffId: a.staffId };
+        }
+      } else if (PENDING.includes(a.status) && (!cur.next || a.startAt < cur.next)) {
+        cur.next = a.startAt;
+      }
       map.set(a.personId, cur);
     }
     return map;
@@ -180,6 +206,10 @@ export class ClientsService {
       phone: p?.phone ?? null,
       visitCount: visits?.count ?? 0,
       lastVisitAt: visits?.last ? visits.last.toISOString() : null,
+      lastAppointmentAt: visits?.lastAppointment?.startAt.toISOString() ?? null,
+      lastServiceId: visits?.lastAppointment?.serviceId ?? null,
+      lastStaffId: visits?.lastAppointment?.staffId ?? null,
+      nextAppointmentAt: visits?.next ? visits.next.toISOString() : null,
     };
   }
 

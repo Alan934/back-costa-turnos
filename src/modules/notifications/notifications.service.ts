@@ -38,6 +38,10 @@ export interface AppointmentNoticeInput {
   manageToken?: string | null;
   /** false = solo reprograma el recordatorio (p. ej. al mover el turno). */
   confirmation?: boolean;
+  /** El profesional movió el turno: cuándo era antes (el email avisa del cambio). */
+  previousWhenText?: string | null;
+  /** Turno fijo: todas las fechas que quedaron reservadas (el email las lista). */
+  seriesDates?: string[] | null;
 }
 
 /** El recordatorio sale 24 h antes del turno. */
@@ -142,6 +146,8 @@ export class NotificationsService {
         isProvisional: input.isProvisional ?? false,
         paymentNote: input.paymentNote ?? null,
         manageToken: input.manageToken ?? null,
+        previousWhenText: input.previousWhenText ?? null,
+        seriesDates: input.seriesDates ?? null,
       };
       const base = {
         professionalId: input.professionalId,

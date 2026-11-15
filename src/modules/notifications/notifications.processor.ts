@@ -72,7 +72,7 @@ export class NotificationsProcessor extends WorkerHost {
         to,
         channel: notification.channel,
         type: notification.type,
-        payload: notification.payload,
+        payload: await this.withConfirmationRequest(notification),
       });
       notification.status = NotificationStatus.Sent;
       notification.sentAt = new Date();
@@ -82,6 +82,25 @@ export class NotificationsProcessor extends WorkerHost {
       await this.notifications.save(notification);
       throw err; // deja que BullMQ reintente
     }
+  }
+
+  /**
+   * Recordatorio de un negocio que pide confirmación: se agrega `askConfirmation` al payload
+   * (el email suma "Confirmo / No puedo ir"). Se decide al salir, no al reservar: si el
+   * profesional lo prende o apaga, aplica también a los recordatorios ya programados.
+   */
+  private async withConfirmationRequest(
+    notification: Notification,
+  ): Promise<Record<string, unknown>> {
+    const payload = notification.payload ?? {};
+    if (notification.type !== NotificationType.Reminder || !notification.professionalId) {
+      return payload;
+    }
+    const professional = await this.professionals.findOne({
+      where: { id: notification.professionalId },
+      select: { id: true, askConfirmation: true },
+    });
+    return professional?.askConfirmation ? { ...payload, askConfirmation: true } : payload;
   }
 
   /** true si el turno del recordatorio ya no existe, no sigue en pie o cambió de horario. */

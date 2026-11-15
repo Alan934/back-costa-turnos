@@ -19,6 +19,9 @@ export class MyAppointmentBusinessDto {
   cancellationWindowHours!: number;
   @ApiProperty({ type: Number })
   rescheduleWindowHours!: number;
+  /** El negocio pide confirmar asistencia el día anterior ("Confirmo / No puedo ir"). */
+  @ApiProperty({ type: Boolean })
+  askConfirmation!: boolean;
   /** WhatsApp/teléfono de contacto del negocio (publicPageSettings.phone). null si no lo cargó. */
   @ApiPropertyOptional({ type: String, nullable: true })
   phone!: string | null;
@@ -78,4 +81,10 @@ export class MyAppointmentDto {
       'cuenta. null en turnos anteriores a esta función y en entradas de sala.',
   })
   manageToken!: string | null;
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Cuándo el cliente confirmó que va. null = todavía no confirmó.',
+  })
+  clientConfirmedAt!: string | null;
 }

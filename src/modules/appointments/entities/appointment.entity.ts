@@ -198,6 +198,23 @@ export class Appointment extends BaseEntity {
   @Column({ name: 'manage_token', type: 'text', nullable: true })
   manageToken!: string | null;
 
+  /**
+   * Turno fijo: los turnos creados juntos al "repetir cada N semanas" comparten este id
+   * (permite cancelar "este y los siguientes"). Null en un turno suelto.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'Serie de turnos fijos' })
+  @Index('idx_appointment_series', { where: 'series_id IS NOT NULL' })
+  @Column({ name: 'series_id', type: 'uuid', nullable: true })
+  seriesId!: string | null;
+
+  /**
+   * Cuándo el cliente confirmó que va (desde el recordatorio o porque el profesional lo marcó).
+   * Null = no confirmó. Se borra al cambiar el horario del turno.
+   */
+  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @Column({ name: 'client_confirmed_at', type: 'timestamptz', nullable: true })
+  clientConfirmedAt!: Date | null;
+
   @ApiProperty({ enum: CreatedVia, enumName: 'CreatedVia' })
   @Column({
     name: 'created_via',

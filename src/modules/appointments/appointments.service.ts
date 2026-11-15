@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,7 +12,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, EntityManager, In, Repository } from 'typeorm';
+import { Between, EntityManager, In, MoreThan, Repository } from 'typeorm';
 import { DateTime } from 'luxon';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -26,6 +27,7 @@ import {
   PaymentStatus,
   PaymentType,
   ProfessionalClientStatus,
+  TimeOffType,
   WaitingRoomStatus,
 } from '@/common/enums';
 import { TenantContextService } from '@/common/context/tenant-context.service';
@@ -44,15 +46,25 @@ import { Staff } from '@/modules/professionals/entities/staff.entity';
 import { Payment } from '@/modules/payments/entities/payment.entity';
 import { ProfessionalClient } from '@/modules/clients/entities/professional-client.entity';
 import {
+  AppointmentNoticeInput,
   formatWhen,
   NotificationsService,
 } from '@/modules/notifications/notifications.service';
+import { TimeOff } from '@/modules/availability/entities/time-off.entity';
 import { PaymentsService } from '@/modules/payments/payments.service';
 import { AppointmentConfirmer } from '@/modules/payments/ports/appointment-confirmer.port';
 import { Appointment } from './entities/appointment.entity';
 import { AppointmentAddon } from './entities/appointment-addon.entity';
 import { AddonBookingSnapshot, PendingBooking } from './entities/pending-booking.entity';
-import { BookAppointmentDto, BookWithDepositDto, ClientRefDto } from './dto/appointment.dto';
+import {
+  BookAppointmentDto,
+  BookSeriesDto,
+  BookSeriesResultDto,
+  BookWithDepositDto,
+  ClientRefDto,
+  RescheduleAppointmentDto,
+  SkippedOccurrenceDto,
+} from './dto/appointment.dto';
 import {
   MyWaitingSpotDto,
   NO_SERVICE_LABEL,
@@ -105,6 +117,17 @@ const EMPTY_ATTENDANCE: WalkInStatusDto = {
 /** Token opaco del link "gestionar mi turno" (192 bits: no se puede adivinar). */
 function newManageToken(): string {
   return randomBytes(24).toString('base64url');
+}
+
+/** Motivo legible de un bloqueo, para la fecha de un turno fijo que no se pudo dar. */
+function describeTimeOff(block: Pick<TimeOff, 'type' | 'reason'>): string {
+  const label =
+    block.type === TimeOffType.Holiday
+      ? 'Feriado'
+      : block.type === TimeOffType.Vacation
+        ? 'Vacaciones'
+        : 'Día bloqueado';
+  return block.reason ? `${label}: ${block.reason}` : label;
 }
 
 /** "$ 2.000" a partir de centavos (para textos de avisos). */
@@ -596,6 +619,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     dto: BookAppointmentDto,
     createdVia: CreatedVia,
     accountId?: string | null,
+    opts: { notify?: boolean; seriesId?: string | null } = {},
   ): Promise<Appointment> {
     const service = await this.loadService(dto.serviceId);
     if (!service.allowNoPayment) {
@@ -618,8 +642,15 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
 
     const startAt = new Date(dto.startAt);
     const endAt = new Date(startAt.getTime() + totalDuration * 60_000);
-    this.assertLeadTime(startAt, membership.minBookingHours);
-    this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
+    if (createdVia === CreatedVia.Professional) {
+      // Lo carga el profesional (un turno que acordó por teléfono, un turno fijo): no le
+      // aplican la anticipación mínima ni la ventana máxima, que son reglas para las reservas
+      // online de sus clientes. Solo se evita cargarlo en el pasado.
+      this.assertLeadTime(startAt, 0);
+    } else {
+      this.assertLeadTime(startAt, membership.minBookingHours);
+      this.assertMaxBookingWindow(startAt, membership.maxBookingDays);
+    }
     const personId = await this.resolvePersonId(dto, accountId);
 
     const conflicts = await this.overlapping(this.appointments, tenantId, startAt, endAt);
@@ -655,6 +686,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       isProvisional,
       createdVia,
       manageToken: newManageToken(),
+      seriesId: opts.seriesId ?? null,
     });
     const saved = await this.appointments.save(appointment);
     await this.ensureProfessionalClient(tenantId, personId);
@@ -673,7 +705,165 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         ),
       );
     }
-    await this.notifyBooked(saved, service);
+    if (opts.notify !== false) await this.notifyBooked(saved, service);
+    return saved;
+  }
+
+  /**
+   * Turnos fijos: el mismo turno (cliente, servicio, quién atiende, hora) cada `everyWeeks`
+   * semanas, `count` veces. La hora se mantiene en la hora local del comercio.
+   *
+   * Cada fecha se reserva con las mismas reglas que un turno cargado a mano; las que no se
+   * pueden (feriado, vacaciones o bloqueo, otro turno a esa hora) se saltean y se devuelven
+   * con el motivo, así el profesional sabe cuáles no quedaron. La primera fecha la eligió él
+   * mismo: no se saltea por un bloqueo (igual que un turno suelto, puede ser un sobreturno).
+   *
+   * El cliente recibe UN solo email con todas las fechas; las demás solo programan su
+   * recordatorio.
+   */
+  async bookSeries(tenantId: string, dto: BookSeriesDto): Promise<BookSeriesResultDto> {
+    const service = await this.loadService(dto.serviceId);
+    const membership = await this.resolveBookingMembership(tenantId, service);
+    const comercio = await this.comercios.getComercio(membership.comercioId);
+    const zone = comercio.timezone;
+    const first = DateTime.fromISO(dto.startAt, { zone });
+    if (!first.isValid) throw new BadRequestException('Fecha inválida');
+
+    // El cliente se resuelve una sola vez: si es nuevo, no se crea una ficha por cada fecha.
+    const personId = await this.resolvePersonId(dto);
+    const seriesId = uuidv7();
+    const created: Appointment[] = [];
+    const skipped: SkippedOccurrenceDto[] = [];
+
+    for (let i = 0; i < dto.count; i++) {
+      const startAt = first.plus({ weeks: i * dto.everyWeeks }).toJSDate();
+      if (i > 0) {
+        const endAt = new Date(startAt.getTime() + service.durationMinutes * 60_000);
+        const block = await this.availability.blockingTimeOff(membership.id, startAt, endAt);
+        if (block) {
+          skipped.push({ startAt: startAt.toISOString(), reason: describeTimeOff(block) });
+          continue;
+        }
+      }
+      try {
+        const appt = await this.book(
+          tenantId,
+          {
+            personId,
+            staffId: dto.staffId,
+            serviceId: dto.serviceId,
+            addonServiceIds: dto.addonServiceIds,
+            startAt: startAt.toISOString(),
+          },
+          CreatedVia.Professional,
+          null,
+          { notify: false, seriesId },
+        );
+        created.push(appt);
+      } catch (err) {
+        if (!(err instanceof HttpException) || err.getStatus() >= 500) throw err;
+        skipped.push({
+          startAt: startAt.toISOString(),
+          reason: err instanceof ConflictException ? 'Ya tenés otro turno a esa hora' : err.message,
+        });
+      }
+    }
+
+    if (created.length === 0) {
+      throw new ConflictException(
+        `No se pudo dar ningún turno: ${skipped[0]?.reason ?? 'sin fechas disponibles'}`,
+      );
+    }
+
+    const seriesDates = created.map((a) => formatWhen(a.startAt, zone));
+    for (const [index, appt] of created.entries()) {
+      await this.notifyBooked(
+        appt,
+        service,
+        undefined,
+        index === 0 ? { seriesDates } : { confirmation: false },
+      );
+    }
+    return { seriesId, created, skipped };
+  }
+
+  /**
+   * El profesional cambia el horario de un turno: mismo cliente, servicio, quién atiende y
+   * duración (incluye adicionales). Valida que el horario nuevo esté libre como al cargar un
+   * turno a mano (sin anticipación mínima ni ventana máxima; no en el pasado).
+   *
+   * Después: el horario viejo se ofrece a la lista de espera, el recordatorio se reprograma
+   * y, salvo `notifyClient: false`, el cliente recibe un email con el horario nuevo.
+   */
+  async reschedule(
+    tenantId: string,
+    id: string,
+    dto: RescheduleAppointmentDto,
+  ): Promise<Appointment> {
+    const appt = await this.findById(tenantId, id);
+    if (
+      ![AppointmentStatus.Requested, AppointmentStatus.Confirmed].includes(appt.status) ||
+      appt.checkedInAt
+    ) {
+      throw new BadRequestException(
+        'Solo se puede cambiar el horario de un turno que todavía no empezó.',
+      );
+    }
+    if (!appt.serviceId) {
+      throw new BadRequestException('Este turno no tiene un horario para cambiar.');
+    }
+    const service = await this.services.findOne({ where: { id: appt.serviceId } });
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+
+    const startAt = new Date(dto.startAt);
+    if (startAt.getTime() < Date.now()) {
+      throw new BadRequestException('No se puede pasar el turno a un horario que ya pasó.');
+    }
+    if (startAt.getTime() === appt.startAt.getTime()) return appt;
+    const endAt = new Date(startAt.getTime() + (appt.endAt.getTime() - appt.startAt.getTime()));
+
+    const conflicts = (await this.overlapping(this.appointments, tenantId, startAt, endAt)).filter(
+      (a) => a.id !== appt.id,
+    );
+    const holds = await this.pendingHolds(this.pendingBookings, tenantId, startAt, endAt);
+    const sameServiceCount =
+      conflicts.filter((a) => a.serviceId === service.id).length +
+      holds.filter((h) => h.serviceId === service.id).length;
+    if (
+      conflicts.some((a) => a.serviceId !== service.id) ||
+      holds.some((h) => h.serviceId !== service.id) ||
+      sameServiceCount >= service.capacity
+    ) {
+      throw new ConflictException('Ya tenés otro turno en ese horario.');
+    }
+
+    const oldStartAt = appt.startAt;
+    appt.startAt = startAt;
+    appt.endAt = endAt;
+    appt.clientConfirmedAt = null; // había confirmado el horario viejo
+    const saved = await this.appointments.save(appt);
+
+    // El horario anterior quedó libre: se avisa a quienes esperaban ese día.
+    await this.waitlist?.notifyFreedSlot({
+      professionalId: saved.professionalId,
+      comercioId: saved.comercioId,
+      membershipId: saved.membershipId,
+      serviceId: saved.serviceId,
+      startAt: oldStartAt,
+      excludePersonId: saved.personId,
+    });
+
+    const professional = await this.professionals.findOne({ where: { id: tenantId } });
+    const zone = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
+    await this.notifyBooked(
+      saved,
+      service,
+      undefined,
+      dto.notifyClient === false
+        ? { confirmation: false }
+        : { previousWhenText: formatWhen(oldStartAt, zone) },
+    );
+    await this.emitWaitingRoom(tenantId, saved.staffId, saved.comercioId);
     return saved;
   }
 
@@ -1150,6 +1340,23 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     return saved;
   }
 
+  /**
+   * El profesional marca (o desmarca) que el cliente confirmó que va: p. ej. le respondió el
+   * recordatorio por WhatsApp. Es la misma marca que deja el cliente al tocar "Confirmo".
+   */
+  async setClientConfirmed(
+    tenantId: string,
+    id: string,
+    confirmed: boolean,
+  ): Promise<Appointment> {
+    const appt = await this.findById(tenantId, id);
+    if (confirmed && TERMINAL_STATUSES.includes(appt.status)) {
+      throw new BadRequestException('El turno ya está cerrado.');
+    }
+    appt.clientConfirmedAt = confirmed ? (appt.clientConfirmedAt ?? new Date()) : null;
+    return this.appointments.save(appt);
+  }
+
   confirm(tenantId: string, id: string): Promise<Appointment> {
     return this.transition(tenantId, id, (a) => {
       if (a.status !== AppointmentStatus.Requested) {
@@ -1247,6 +1454,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     tenantId: string,
     id: string,
     reason: CancellationReason = CancellationReason.Client,
+    includeFollowing = false,
   ): Promise<Appointment> {
     const cancelled = await this.transition(tenantId, id, (a) => {
       if ([AppointmentStatus.Done, AppointmentStatus.Cancelled].includes(a.status)) {
@@ -1264,6 +1472,33 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
       startAt: cancelled.startAt,
       excludePersonId: cancelled.personId,
     });
+
+    // Turno fijo: "este y los siguientes" (el cliente dejó de venir en ese horario).
+    if (includeFollowing && cancelled.seriesId) {
+      const following = await this.appointments.find({
+        where: {
+          professionalId: tenantId,
+          seriesId: cancelled.seriesId,
+          startAt: MoreThan(cancelled.startAt),
+          status: In([AppointmentStatus.Requested, AppointmentStatus.Confirmed]),
+        },
+      });
+      for (const a of following) {
+        a.status = AppointmentStatus.Cancelled;
+        a.cancellationReason = reason;
+      }
+      await this.appointments.save(following);
+      for (const a of following) {
+        await this.waitlist?.notifyFreedSlot({
+          professionalId: a.professionalId,
+          comercioId: a.comercioId,
+          membershipId: a.membershipId,
+          serviceId: a.serviceId,
+          startAt: a.startAt,
+          excludePersonId: a.personId,
+        });
+      }
+    }
     return cancelled;
   }
 
@@ -2194,6 +2429,7 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
     appointment: Appointment,
     service: Service,
     paymentNote?: string,
+    extra: Pick<AppointmentNoticeInput, 'confirmation' | 'previousWhenText' | 'seriesDates'> = {},
   ): Promise<void> {
     // Si esa persona estaba en la lista de espera para ese día, ya consiguió turno.
     await this.waitlist?.markBooked({
@@ -2223,11 +2459,16 @@ export class AppointmentsService implements OnModuleInit, AppointmentConfirmer {
         isProvisional: appointment.isProvisional,
         paymentNote,
         manageToken: appointment.manageToken,
+        ...extra,
       });
 
       // Reservó el cliente por su cuenta: se le avisa al profesional (si lo cargó él mismo
-      // desde la agenda, ya lo sabe).
-      if (appointment.createdVia === CreatedVia.ClientSelf) {
+      // desde la agenda, ya lo sabe; tampoco si es el profesional quien lo está moviendo).
+      if (
+        appointment.createdVia === CreatedVia.ClientSelf &&
+        extra.confirmation !== false &&
+        !extra.previousWhenText
+      ) {
         const person = await this.persons.findById(appointment.personId);
         const timezone = professional?.timezone ?? 'America/Argentina/Buenos_Aires';
         const whenText = formatWhen(appointment.startAt, timezone);

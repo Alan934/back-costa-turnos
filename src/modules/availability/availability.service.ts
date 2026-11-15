@@ -647,6 +647,33 @@ export class AvailabilityService {
     };
   }
 
+  /**
+   * Bloqueo que pisa [start,end) para el profesional de la membresía: vacaciones o bloqueo
+   * cargado (en cualquiera de sus comercios) o un feriado en el que esta membresía no trabaja.
+   * null si el horario está libre de bloqueos. No mira turnos ni horario de atención: lo usan
+   * los turnos fijos para saltear las fechas en las que el profesional no está.
+   */
+  async blockingTimeOff(membershipId: string, start: Date, end: Date): Promise<TimeOff | null> {
+    const membership = await this.comercios.getMembershipById(membershipId);
+    const comercio = await this.comercios.getComercio(membership.comercioId);
+    const membershipIds = await this.comercios.listMembershipIds(membership.professionalId);
+    const manual = membershipIds.length
+      ? await this.timeOffs
+          .createQueryBuilder('t')
+          .where('t.membership_id IN (:...ids)', { ids: membershipIds })
+          .andWhere('t.start_at < :end AND t.end_at > :start', { start, end })
+          .orderBy('t.start_at', 'ASC')
+          .getOne()
+      : null;
+    if (manual) return manual;
+
+    const zone = comercio.timezone;
+    const from = DateTime.fromJSDate(start, { zone }).toISODate()!;
+    const to = DateTime.fromJSDate(end, { zone }).toISODate()!;
+    const holiday = (await this.holidays.listBlockedForMembership(membership, from, to))[0];
+    return holiday ? this.holidayAsTimeOff(membership, holiday.date, holiday.name, zone) : null;
+  }
+
   /** Feriado (YYYY-MM-DD) como bloqueo en memoria que cubre el día completo en la zona del comercio. */
   private holidayAsTimeOff(
     membership: Pick<Membership, 'id' | 'professionalId'>,

@@ -11,9 +11,13 @@ import { AppointmentsService } from './appointments.service';
 import { Appointment } from './entities/appointment.entity';
 import {
   BookAppointmentDto,
+  BookSeriesDto,
+  BookSeriesResultDto,
   BookWithDepositDto,
   BookWithDepositResultDto,
   CancelAppointmentDto,
+  RescheduleAppointmentDto,
+  SetClientConfirmedDto,
   CompleteAppointmentDto,
 } from './dto/appointment.dto';
 import {
@@ -53,6 +57,20 @@ export class AppointmentsController {
   @Post()
   book(@CurrentTenant() tenantId: string, @Body() dto: BookAppointmentDto) {
     return this.appointments.book(tenantId, dto, CreatedVia.Professional);
+  }
+
+  @ApiOperation({
+    summary: 'Turno fijo: el mismo turno cada N semanas',
+    description:
+      'Crea `count` turnos separados por `everyWeeks` semanas. Las fechas que no se pueden dar ' +
+      '(feriado, vacaciones, bloqueo u otro turno) se devuelven en `skipped` con el motivo.',
+  })
+  @ApiResponse({ status: 201, type: BookSeriesResultDto })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 409, description: 'No se pudo dar ninguna fecha' })
+  @Post('series')
+  bookSeries(@CurrentTenant() tenantId: string, @Body() dto: BookSeriesDto) {
+    return this.appointments.bookSeries(tenantId, dto);
   }
 
   @ApiOperation({ summary: 'Reservar un turno pagando la sena' })
@@ -290,6 +308,33 @@ export class AppointmentsController {
     return this.appointments.noShow(tenantId, id);
   }
 
+  @ApiOperation({ summary: 'Marcar que el cliente confirmó que va (o desmarcarlo)' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'El turno ya está cerrado' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @Post(':id/client-confirmed')
+  setClientConfirmed(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: SetClientConfirmedDto,
+  ) {
+    return this.appointments.setClientConfirmed(tenantId, id, dto.confirmed);
+  }
+
+  @ApiOperation({ summary: 'Cambiar el horario de un turno (lo hace el profesional)' })
+  @ApiResponse({ status: 201, type: Appointment })
+  @ApiResponse({ status: 400, description: 'El turno ya empezó o el horario ya pasó' })
+  @ApiResponse({ status: 404, description: 'No encontrado' })
+  @ApiResponse({ status: 409, description: 'El horario nuevo está ocupado' })
+  @Post(':id/reschedule')
+  reschedule(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: RescheduleAppointmentDto,
+  ) {
+    return this.appointments.reschedule(tenantId, id, dto);
+  }
+
   @ApiOperation({ summary: 'Cancelar un turno' })
   @ApiResponse({ status: 201, type: Appointment })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
@@ -302,6 +347,6 @@ export class AppointmentsController {
     @Param('id') id: string,
     @Body() dto: CancelAppointmentDto,
   ) {
-    return this.appointments.cancel(tenantId, id, dto.reason);
+    return this.appointments.cancel(tenantId, id, dto.reason, dto.includeFollowing === true);
   }
 }

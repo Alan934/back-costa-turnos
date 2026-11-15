@@ -146,6 +146,14 @@ export class UpdateProfessionalDto {
   rescheduleWindowHours?: number;
 
   @ApiPropertyOptional({
+    type: Boolean,
+    description: 'El recordatorio del día anterior le pide al cliente que confirme o avise que no va.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  askConfirmation?: boolean;
+
+  @ApiPropertyOptional({
     type: 'object',
     additionalProperties: true,
     description:

@@ -121,16 +121,49 @@ export class MeService {
     return this.rescheduleAppointment(await this.findByManageToken(token), dto);
   }
 
+  /**
+   * Confirmación del día anterior: el cliente avisa que va. Idempotente (si ya confirmó, no
+   * cambia la fecha). Solo turnos que siguen en pie y todavía no empezaron.
+   */
+  async confirmByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    if (TERMINAL.includes(appt.status) || appt.status === AppointmentStatus.InProgress) {
+      throw new BadRequestException('Este turno ya no se puede confirmar.');
+    }
+    if (!appt.clientConfirmedAt) {
+      appt.clientConfirmedAt = new Date();
+      await this.appointments.save(appt);
+    }
+    return this.toDto(appt, await this.loadRefs([appt]));
+  }
+
+  /**
+   * "No puedo ir" desde el pedido de confirmación: cancela y libera el horario. Si el negocio
+   * pide confirmación, se acepta aunque esté dentro de la ventana de cancelación (el aviso
+   * llega justo el día anterior y el objetivo es que el horario no quede vacío sin aviso).
+   */
+  async declineByManageToken(token: string): Promise<MyAppointmentDto> {
+    const appt = await this.findByManageToken(token);
+    const professional = await this.professionals.findOne({ where: { id: appt.professionalId } });
+    return this.cancelAppointment(appt, { ignoreWindow: professional?.askConfirmation === true });
+  }
+
   /** Cancela el turno ya resuelto (por cuenta o por token), respetando la ventana del negocio. */
-  private async cancelAppointment(appt: Appointment): Promise<MyAppointmentDto> {
+  private async cancelAppointment(
+    appt: Appointment,
+    opts: { ignoreWindow?: boolean } = {},
+  ): Promise<MyAppointmentDto> {
     if (TERMINAL.includes(appt.status)) {
       throw new BadRequestException('El turno no se puede cancelar en su estado actual');
+    }
+    if (opts.ignoreWindow && appt.startAt.getTime() < Date.now()) {
+      throw new BadRequestException('El turno ya pasó.');
     }
 
     const professional = await this.professionals.findOne({ where: { id: appt.professionalId } });
     const windowHours = professional?.cancellationWindowHours ?? 0;
     const deadline = appt.startAt.getTime() - windowHours * 3_600_000;
-    if (Date.now() > deadline) {
+    if (!opts.ignoreWindow && Date.now() > deadline) {
       throw new ConflictException(
         `Solo se puede cancelar hasta ${windowHours}h antes del turno. Contactá al negocio.`,
       );
@@ -266,6 +299,7 @@ export class MeService {
     const oldStartAt = appt.startAt.toISOString();
     appt.startAt = newStart;
     appt.endAt = newEnd;
+    appt.clientConfirmedAt = null; // confirmó el horario viejo, no este
     await this.appointments.save(appt);
 
     // El horario anterior quedó libre: se avisa a quienes esperaban ese día.
@@ -375,12 +409,14 @@ export class MeService {
       staffName: staff?.displayName ?? '',
       publicToken: a.publicToken,
       manageToken: a.manageToken,
+      clientConfirmedAt: a.clientConfirmedAt ? a.clientConfirmedAt.toISOString() : null,
       business: {
         name: professional?.businessName ?? '',
         slug: professional?.slug ?? '',
         address: professional?.address ?? null,
         cancellationWindowHours: professional?.cancellationWindowHours ?? 0,
         rescheduleWindowHours: professional?.rescheduleWindowHours ?? 0,
+        askConfirmation: professional?.askConfirmation ?? false,
         // Mismo origen que la página pública (publicPageSettings). Crudo: el front
         // normaliza dígitos para wa.me. null si el profesional no lo cargó.
         phone: professional?.publicPageSettings?.phone ?? null,
